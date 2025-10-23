@@ -111,17 +111,17 @@ install_dependencies() {
     case $DISTRO in
         ubuntu|debian)
             apt-get update
-            apt-get install -y libpam-python python3 python3-pip
+            apt-get install -y libpam-python python3 python3-pip libnotify-bin
             ;;
         fedora|rhel|centos)
-            dnf install -y pam_python python3 python3-pip
+            dnf install -y pam_python python3 python3-pip libnotify
             ;;
         arch|manjaro)
-            pacman -S --noconfirm python-pam python python-pip
+            pacman -S --noconfirm python-pam python python-pip libnotify
             ;;
         *)
             print_warning "Unsupported distribution: $DISTRO"
-            print_info "Please install pam_python and Python 3 manually"
+            print_info "Please install pam_python, Python 3, and libnotify manually"
             return 1
             ;;
     esac
@@ -140,6 +140,32 @@ uninstall() {
     if [[ -f "$MODULE_DIR/$MODULE_NAME" ]]; then
         rm -f "$MODULE_DIR/$MODULE_NAME"
         print_success "Removed module: $MODULE_DIR/$MODULE_NAME"
+    fi
+    
+    # Remove desktop integration files
+    if [[ -f "$MODULE_DIR/pam_nextcloud_desktop.py" ]]; then
+        rm -f "$MODULE_DIR/pam_nextcloud_desktop.py"
+        print_success "Removed: $MODULE_DIR/pam_nextcloud_desktop.py"
+    fi
+    
+    if [[ -f "$MODULE_DIR/pam_nextcloud_groups.py" ]]; then
+        rm -f "$MODULE_DIR/pam_nextcloud_groups.py"
+        print_success "Removed: $MODULE_DIR/pam_nextcloud_groups.py"
+    fi
+    
+    if [[ -f "/usr/local/bin/gnome-nextcloud-setup.sh" ]]; then
+        rm -f /usr/local/bin/gnome-nextcloud-setup.sh
+        print_success "Removed: /usr/local/bin/gnome-nextcloud-setup.sh"
+    fi
+    
+    if [[ -f "/usr/local/bin/kde-nextcloud-setup.sh" ]]; then
+        rm -f /usr/local/bin/kde-nextcloud-setup.sh
+        print_success "Removed: /usr/local/bin/kde-nextcloud-setup.sh"
+    fi
+    
+    if [[ -f "/etc/xdg/autostart/gnome-nextcloud-setup.desktop" ]]; then
+        rm -f /etc/xdg/autostart/gnome-nextcloud-setup.desktop
+        print_success "Removed: /etc/xdg/autostart/gnome-nextcloud-setup.desktop"
     fi
     
     # Ask about config file
@@ -242,6 +268,27 @@ install() {
         print_success "Installed: /usr/local/bin/kde-nextcloud-setup.sh"
     fi
     
+    # Install GNOME autostart desktop file
+    if [[ -f "gnome-nextcloud-setup.sh" ]]; then
+        print_info "Installing GNOME autostart configuration..."
+        mkdir -p /etc/xdg/autostart
+        
+        cat > /etc/xdg/autostart/gnome-nextcloud-setup.desktop << 'DESKTOP_EOF'
+[Desktop Entry]
+Type=Application
+Name=Nextcloud Integration Setup
+Comment=Complete Nextcloud setup in GNOME Settings
+Exec=/usr/local/bin/gnome-nextcloud-setup.sh
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Phase=Applications
+DESKTOP_EOF
+        
+        chmod 644 /etc/xdg/autostart/gnome-nextcloud-setup.desktop
+        print_success "Installed: /etc/xdg/autostart/gnome-nextcloud-setup.desktop"
+    fi
+    
     # Handle configuration file
     if [[ -f "$CONFIG_DIR/$CONFIG_NAME" ]]; then
         print_warning "Configuration file already exists: $CONFIG_DIR/$CONFIG_NAME"
@@ -249,13 +296,17 @@ install() {
             read -p "Overwrite? (y/N): " overwrite
             if [[ "$overwrite" =~ ^[Yy]$ ]]; then
                 cp pam_nextcloud.conf.example "$CONFIG_DIR/$CONFIG_NAME"
+                # Make readable by all (but writable only by root) so desktop integration works
+                chmod 644 "$CONFIG_DIR/$CONFIG_NAME"
+                chown root:root "$CONFIG_DIR/$CONFIG_NAME"
                 print_success "Configuration file overwritten"
             fi
         fi
     else
         print_info "Installing configuration file..."
         cp pam_nextcloud.conf.example "$CONFIG_DIR/$CONFIG_NAME"
-        chmod 600 "$CONFIG_DIR/$CONFIG_NAME"
+        # Make readable by all (but writable only by root) so desktop integration works
+        chmod 644 "$CONFIG_DIR/$CONFIG_NAME"
         chown root:root "$CONFIG_DIR/$CONFIG_NAME"
         print_success "Installed: $CONFIG_DIR/$CONFIG_NAME"
     fi
