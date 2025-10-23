@@ -1,0 +1,80 @@
+# PAM Nextcloud Configuration File
+# 
+# This file should be copied to /etc/security/pam_nextcloud.conf
+# and configured with your Nextcloud server details.
+#
+# Installation:
+#   sudo cp pam_nextcloud.conf.example /etc/security/pam_nextcloud.conf
+#   sudo chmod 600 /etc/security/pam_nextcloud.conf
+#   sudo chown root:root /etc/security/pam_nextcloud.conf
+
+[nextcloud]
+# URL of your Nextcloud server (required)
+# Include the protocol (https:// or http://)
+url = https://cloud.example.com
+
+# SSL certificate verification (optional, default: true)
+# Set to false only if using self-signed certificates
+# WARNING: Setting this to false is not recommended for production
+verify_ssl = true
+
+# Connection timeout in seconds (optional, default: 10)
+# Maximum time to wait for Nextcloud server response
+timeout = 10
+
+# Enable password caching for offline authentication (optional, default: false)
+# When enabled, successful authentications cache a hashed password
+# If Nextcloud is unavailable, cached credentials can be used as fallback
+enable_cache = true
+
+# Cache expiry in days (optional, default: 7)
+# Cached credentials older than this will be rejected
+# Set to 0 to cache indefinitely (not recommended)
+cache_expiry_days = 7
+
+# Cache directory (optional, default: /var/cache/pam_nextcloud)
+# Directory must be created with root-only permissions (700)
+# Individual cache files will have 600 permissions
+cache_directory = /var/cache/pam_nextcloud
+
+# Desktop integration (optional, default: false)
+# Automatically configure GNOME Online Accounts or KDE accounts
+# for Nextcloud when users log in
+enable_desktop_integration = true
+
+# Force desktop type (optional, default: auto-detect)
+# Options: gnome, kde, or leave blank for auto-detection
+# Only needed if auto-detection fails
+force_desktop_type =
+
+# Group synchronization (optional, default: false)
+# Automatically sync user's Nextcloud groups to local Linux groups
+# Groups are created if they don't exist
+enable_group_sync = true
+
+[group_sync]
+# Prefix for managed groups (optional, default: nc-)
+# Groups synced from Nextcloud will be prefixed with this
+prefix = nc-
+
+# Enable automatic sudo mapping (optional, default: true)
+# Maps Nextcloud admin groups to local sudo/wheel/admin group
+enable_sudo_mapping = true
+
+# Create missing groups (optional, default: true)
+# Automatically create groups that don't exist on the system
+create_missing_groups = true
+
+[group_mapping]
+# Map Nextcloud groups to specific Linux groups
+# Format: nextcloud_group = linux_group1, linux_group2
+# Multiple Linux groups can be specified separated by commas
+#
+# Examples:
+# admins = sudo
+# developers = docker, sudo
+# staff = users
+# students = users
+#
+# If not mapped, groups will be created with the prefix (nc-groupname)
+

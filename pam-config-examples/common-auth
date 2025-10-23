@@ -1,0 +1,28 @@
+# Example PAM configuration for authentication
+# This file shows how to integrate pam_nextcloud into your PAM stack
+#
+# Copy this to /etc/pam.d/common-auth or add the pam_nextcloud line
+# to your existing PAM configuration.
+#
+# IMPORTANT: Be careful when modifying PAM configuration!
+# Incorrect configuration can lock you out of your system.
+# Always test in a non-critical environment first.
+
+# Primary authentication with pam_nextcloud
+# The 'sufficient' control flag means if this succeeds, no further modules are tried
+# If it fails, continue to next module
+auth    [success=1 default=ignore]  pam_python.so pam_nextcloud.py
+
+# Fallback to local Unix authentication
+# This allows local users to still login if Nextcloud is unavailable
+auth    requisite                   pam_deny.so
+auth    required                    pam_permit.so
+
+# Optional: Use pam_nextcloud as primary with Unix fallback
+# Uncomment these lines instead of the above if you want to try Nextcloud first,
+# then fall back to local Unix authentication
+#auth    sufficient  pam_python.so pam_nextcloud.py
+#auth    sufficient  pam_unix.so nullok_secure try_first_pass
+#auth    requisite   pam_deny.so
+#auth    required    pam_permit.so
+

@@ -1,0 +1,29 @@
+# Example PAM configuration for SSH
+# This file shows how to use pam_nextcloud for SSH authentication
+#
+# Copy this to /etc/pam.d/sshd or modify your existing sshd PAM configuration
+#
+# IMPORTANT: Make sure to also configure /etc/ssh/sshd_config:
+#   ChallengeResponseAuthentication yes
+#   UsePAM yes
+#   PasswordAuthentication yes
+
+# Include common authentication (which includes pam_nextcloud)
+@include common-auth
+
+# Or configure directly here:
+# Nextcloud authentication
+#auth    sufficient  pam_python.so pam_nextcloud.py
+#
+# Fallback to local Unix authentication
+#auth    sufficient  pam_unix.so nullok_secure try_first_pass
+#auth    requisite   pam_deny.so
+#auth    required    pam_permit.so
+
+# Account management
+account required    pam_python.so pam_nextcloud.py
+
+# Session management
+session required    pam_python.so pam_nextcloud.py
+session required    pam_unix.so
+

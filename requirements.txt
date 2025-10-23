@@ -1,0 +1,10 @@
+# Python dependencies for PAM Nextcloud module
+
+# HTTP library for API requests
+requests>=2.25.0
+
+# Note: pam_python must be installed separately via your system package manager
+# On Debian/Ubuntu: sudo apt-get install libpam-python
+# On Fedora/RHEL: sudo dnf install pam_python
+# On Arch Linux: sudo pacman -S python-pam
+
