@@ -269,15 +269,182 @@ install() {
     
     print_success "Installation complete!"
     echo ""
+    
+    # Offer to configure PAM
+    if [[ "$AUTO_MODE" == false ]]; then
+        echo ""
+        print_warning "PAM CONFIGURATION"
+        print_warning "Incorrect PAM configuration can lock you out of your system!"
+        print_warning "Make sure you understand what you're doing and keep a root shell open."
+        echo ""
+        read -p "Would you like to configure PAM now? (y/N): " configure_pam
+        
+        if [[ "$configure_pam" =~ ^[Yy]$ ]]; then
+            configure_pam_interactive
+        else
+            print_info "Skipping PAM configuration"
+            print_info "You can configure PAM manually later using the examples in pam-config-examples/"
+        fi
+    fi
+    
+    echo ""
     print_info "Next steps:"
     echo "  1. Edit $CONFIG_DIR/$CONFIG_NAME with your Nextcloud server details"
     echo "  2. (Optional) Enable offline authentication caching in config"
     echo "  3. (Optional) Enable group synchronization in config"
     echo "  4. Test authentication: test-pam-nextcloud --username YOUR_USERNAME"
-    echo "  5. Configure PAM (see pam-config-examples/ directory)"
+    if [[ "$AUTO_MODE" == false ]] && [[ ! "$configure_pam" =~ ^[Yy]$ ]]; then
+        echo "  5. Configure PAM (see pam-config-examples/ directory)"
+    fi
     echo ""
-    print_warning "IMPORTANT: Be careful when configuring PAM!"
-    print_warning "Always keep a root shell open when testing PAM configuration."
+    print_warning "IMPORTANT: Always keep a root shell open when testing PAM configuration!"
+}
+
+# Configure PAM interactively
+configure_pam_interactive() {
+    print_header "Configuring PAM"
+    
+    echo "Select which PAM service to configure:"
+    echo "  1) SSH (sshd) - For SSH login"
+    echo "  2) Display Manager (lightdm/gdm/sddm) - For graphical login"
+    echo "  3) Common Auth - For all services"
+    echo "  4) Sudo - For sudo authentication"
+    echo "  5) Cancel"
+    echo ""
+    read -p "Choice [1-5]: " pam_choice
+    
+    case $pam_choice in
+        1)
+            configure_pam_service "sshd" "SSH"
+            ;;
+        2)
+            # Detect display manager
+            if command -v lightdm &> /dev/null || [[ -f /etc/pam.d/lightdm ]]; then
+                configure_pam_service "lightdm" "LightDM"
+            elif command -v gdm &> /dev/null || command -v gdm3 &> /dev/null || [[ -f /etc/pam.d/gdm-password ]]; then
+                configure_pam_service "gdm-password" "GDM"
+            elif command -v sddm &> /dev/null || [[ -f /etc/pam.d/sddm ]]; then
+                configure_pam_service "sddm" "SDDM"
+            else
+                print_warning "Could not detect display manager"
+                read -p "Enter PAM service name (e.g., lightdm, gdm-password, sddm): " service_name
+                if [[ -n "$service_name" ]]; then
+                    configure_pam_service "$service_name" "$service_name"
+                fi
+            fi
+            ;;
+        3)
+            configure_pam_service "common-auth" "Common Auth"
+            ;;
+        4)
+            configure_pam_service "sudo" "Sudo"
+            ;;
+        5|*)
+            print_info "Cancelled PAM configuration"
+            return
+            ;;
+    esac
+}
+
+# Configure specific PAM service
+configure_pam_service() {
+    local service=$1
+    local service_name=$2
+    local pam_file="/etc/pam.d/$service"
+    
+    print_info "Configuring PAM for $service_name"
+    
+    # Check if PAM file exists
+    if [[ ! -f "$pam_file" ]]; then
+        print_warning "PAM file not found: $pam_file"
+        read -p "Create new file? (y/N): " create_file
+        if [[ ! "$create_file" =~ ^[Yy]$ ]]; then
+            return
+        fi
+    fi
+    
+    # Backup existing file
+    if [[ -f "$pam_file" ]]; then
+        local backup_file="${pam_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp "$pam_file" "$backup_file"
+        print_success "Backed up to: $backup_file"
+    fi
+    
+    # Check what to configure
+    echo ""
+    echo "What would you like to enable?"
+    echo "  1) Authentication only"
+    echo "  2) Authentication + Session (for group sync & desktop integration)"
+    echo "  3) Authentication + Session + Password change"
+    echo ""
+    read -p "Choice [1-3]: " config_choice
+    
+    # Add authentication line
+    print_info "Adding authentication configuration..."
+    
+    if [[ -f "$pam_file" ]]; then
+        # Insert after the first auth line or at the beginning of auth section
+        sed -i "/^auth.*/ a auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+            # If sed fails, append to file
+            echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+        }
+    else
+        # Create new file
+        cat > "$pam_file" << 'EOF'
+# PAM configuration for nextcloud authentication
+auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py
+auth    required    pam_unix.so try_first_pass
+
+account required    pam_unix.so
+EOF
+    fi
+    
+    # Add session configuration if requested
+    if [[ "$config_choice" == "2" ]] || [[ "$config_choice" == "3" ]]; then
+        print_info "Adding session configuration (group sync & desktop integration)..."
+        
+        if ! grep -q "session.*pam_nextcloud" "$pam_file"; then
+            echo "session optional    pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+        fi
+    fi
+    
+    # Add password configuration if requested
+    if [[ "$config_choice" == "3" ]]; then
+        print_info "Adding password change configuration..."
+        
+        if ! grep -q "password.*pam_nextcloud" "$pam_file"; then
+            sed -i "/^password.*/ a password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+            }
+        fi
+    fi
+    
+    print_success "PAM configured for $service_name"
+    
+    # Show what was configured
+    echo ""
+    print_info "Current configuration for $service:"
+    grep "pam_nextcloud" "$pam_file" || echo "  (no pam_nextcloud lines found - manual configuration may be needed)"
+    
+    echo ""
+    print_warning "IMPORTANT REMINDERS:"
+    echo "  1. Keep this terminal/shell open!"
+    echo "  2. Open a NEW terminal to test authentication"
+    echo "  3. Do NOT close this terminal until you've verified login works"
+    echo "  4. If you get locked out, use the backup: $backup_file"
+    echo ""
+    
+    # Restart service if needed
+    if [[ "$service" == "sshd" ]]; then
+        read -p "Restart SSH service now? (y/N): " restart_ssh
+        if [[ "$restart_ssh" =~ ^[Yy]$ ]]; then
+            if systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null; then
+                print_success "SSH service restarted"
+            else
+                print_warning "Could not restart SSH service automatically"
+            fi
+        fi
+    fi
 }
 
 # Main execution
