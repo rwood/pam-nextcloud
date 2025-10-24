@@ -380,7 +380,8 @@ configure_pam_interactive() {
     echo "  2) Display Manager (lightdm/gdm/sddm) - For graphical login"
     echo "  3) Common Auth - For all services"
     echo "  4) Sudo - For sudo authentication"
-    echo "  5) Cancel"
+    echo "  5) Standard setup (SSHD + Display Manager + Sudo)"
+    echo "  6) Cancel"
     echo ""
     read -p "Choice [1-5]: " pam_choice
     
@@ -410,7 +411,10 @@ configure_pam_interactive() {
         4)
             configure_pam_service "sudo" "Sudo"
             ;;
-        5|*)
+        5)
+            configure_standard_services
+            ;;
+        6|*)
             print_info "Cancelled PAM configuration"
             return
             ;;
@@ -520,6 +524,34 @@ EOF
             fi
         fi
     fi
+}
+
+# Configure common services: sshd, desktop display manager, sudo
+configure_standard_services() {
+    print_header "Configuring PAM: Standard setup (SSHD + Display Manager + Sudo)"
+
+    # SSHD
+    configure_pam_service "sshd" "SSH"
+
+    # Detect display manager
+    local dm_service=""
+    local dm_label=""
+    if command -v lightdm &> /dev/null || [[ -f /etc/pam.d/lightdm ]]; then
+        dm_service="lightdm"; dm_label="LightDM"
+    elif command -v gdm &> /dev/null || command -v gdm3 &> /dev/null || [[ -f /etc/pam.d/gdm-password ]]; then
+        dm_service="gdm-password"; dm_label="GDM"
+    elif command -v sddm &> /dev/null || [[ -f /etc/pam.d/sddm ]]; then
+        dm_service="sddm"; dm_label="SDDM"
+    fi
+
+    if [[ -n "$dm_service" ]]; then
+        configure_pam_service "$dm_service" "$dm_label"
+    else
+        print_warning "No display manager detected; skipping desktop login configuration"
+    fi
+
+    # Sudo
+    configure_pam_service "sudo" "Sudo"
 }
 
 # Main execution
