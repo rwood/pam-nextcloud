@@ -39,6 +39,7 @@ import json
 import time
 import subprocess
 from datetime import datetime, timedelta
+import pwd
 
 
 class NextcloudAuth:
@@ -587,6 +588,24 @@ def pam_sm_authenticate(pamh, flags, argv):
         
         # Authenticate
         if _authenticator.authenticate(username, password):
+            # Attempt to capture groups for use in session phase
+            try:
+                groups = _authenticator.get_user_groups(username, password)
+                if groups:
+                    try:
+                        user_info = pwd.getpwnam(username)
+                        run_dir = f"/run/pam-nextcloud/{user_info.pw_uid}"
+                        os.makedirs(run_dir, mode=0o700, exist_ok=True)
+                        groups_file = os.path.join(run_dir, 'groups.json')
+                        with open(groups_file, 'w') as f:
+                            json.dump({'groups': groups}, f)
+                        os.chmod(groups_file, 0o600)
+                    except Exception as e:
+                        syslog.syslog(syslog.LOG_DEBUG,
+                            f"pam_nextcloud: Unable to persist groups for session: {str(e)}")
+            except Exception as e:
+                syslog.syslog(syslog.LOG_DEBUG,
+                    f"pam_nextcloud: Unable to retrieve groups at auth phase: {str(e)}")
             return pamh.PAM_SUCCESS
         else:
             return pamh.PAM_AUTH_ERR
@@ -734,15 +753,28 @@ def pam_sm_open_session(pamh, flags, argv):
                 except:
                     pass
                 
-                if not password:
-                    # Check if we have cached credentials
-                    # We'll try to authenticate with cached password to get groups
-                    syslog.syslog(syslog.LOG_INFO,
-                        f"pam_nextcloud: Password not available for group sync, skipping for user: {username}")
-                    return pamh.PAM_SUCCESS
+                nextcloud_groups = None
                 
-                # Fetch groups from Nextcloud
-                nextcloud_groups = _authenticator.get_user_groups(username, password)
+                if password:
+                    # Fetch groups from Nextcloud directly if password is available
+                    nextcloud_groups = _authenticator.get_user_groups(username, password)
+                else:
+                    # Fallback: try to read groups captured during auth phase
+                    try:
+                        user_info = pwd.getpwnam(username)
+                        run_dir = f"/run/pam-nextcloud/{user_info.pw_uid}"
+                        groups_file = os.path.join(run_dir, 'groups.json')
+                        if os.path.exists(groups_file):
+                            with open(groups_file, 'r') as f:
+                                data = json.load(f)
+                                nextcloud_groups = data.get('groups', [])
+                            # Remove file after reading to avoid reuse
+                            try:
+                                os.remove(groups_file)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                 
                 if nextcloud_groups is not None and len(nextcloud_groups) > 0:
                     # Run group sync script
