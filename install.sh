@@ -268,6 +268,26 @@ install() {
         print_success "Installed: /usr/local/bin/kde-nextcloud-setup.sh"
     fi
     
+    # Install KDE autostart desktop file
+    if [[ -f "kde-nextcloud-setup.sh" ]]; then
+        print_info "Installing KDE autostart configuration..."
+        mkdir -p /etc/xdg/autostart
+        
+        cat > /etc/xdg/autostart/kde-nextcloud-setup.desktop << 'DESKTOP_EOF'
+[Desktop Entry]
+Type=Application
+Name=Nextcloud Integration Setup
+Comment=Complete Nextcloud setup in System Settings (Online Accounts)
+Exec=/usr/local/bin/kde-nextcloud-setup.sh
+Hidden=false
+NoDisplay=false
+X-KDE-autostart-after=panel
+DESKTOP_EOF
+        
+        chmod 644 /etc/xdg/autostart/kde-nextcloud-setup.desktop
+        print_success "Installed: /etc/xdg/autostart/kde-nextcloud-setup.desktop"
+    fi
+    
     # Install GNOME autostart desktop file
     if [[ -f "gnome-nextcloud-setup.sh" ]]; then
         print_info "Installing GNOME autostart configuration..."
