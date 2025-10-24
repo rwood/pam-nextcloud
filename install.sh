@@ -430,15 +430,19 @@ configure_pam_service() {
     echo ""
     read -p "Choice [1-3]: " config_choice
     
-    # Add authentication line
+    # Add authentication line (avoid duplicates)
     print_info "Adding authentication configuration..."
     
     if [[ -f "$pam_file" ]]; then
-        # Insert after the first auth line or at the beginning of auth section
-        sed -i "/^auth.*/ a auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
-            # If sed fails, append to file
-            echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
-        }
+        if ! grep -q "auth\s\+.*pam_nextcloud\.py" "$pam_file"; then
+            # Insert after the first auth line or at the beginning of auth section
+            sed -i "/^auth.*/ a auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+                # If sed fails, append to file
+                echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+            }
+        else
+            print_info "Auth configuration already present; skipping duplicate insert"
+        fi
     else
         # Create new file
         cat > "$pam_file" << 'EOF'
