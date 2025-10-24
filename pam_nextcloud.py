@@ -288,17 +288,17 @@ class NextcloudAuth:
         try_cache = False
         
         try:
-            # Use Nextcloud OCS API to verify credentials
-            # The user provisioning API endpoint requires authentication
-            api_url = urljoin(self.nextcloud_url, '/ocs/v1.php/cloud/users')
-            
-            # Try to get user information - this requires valid credentials
-            user_url = urljoin(api_url + '/', username)
+            # Use Nextcloud OCS API self endpoint to verify credentials
+            # This works with regular user credentials (no admin required)
+            api_url = urljoin(self.nextcloud_url, '/ocs/v2.php/cloud/user')
             
             response = requests.get(
-                user_url,
+                api_url,
                 auth=(username, password),
-                headers={'OCS-APIRequest': 'true'},
+                headers={
+                    'OCS-APIRequest': 'true',
+                    'Accept': 'application/json'
+                },
                 verify=self.verify_ssl,
                 timeout=self.timeout
             )
@@ -321,7 +321,7 @@ class NextcloudAuth:
                 return False
             else:
                 syslog.syslog(syslog.LOG_ERR,
-                    f"pam_nextcloud: Unexpected response code {response.status_code} for user: {username}")
+                    f"pam_nextcloud: Unexpected response code {response.status_code} from self endpoint for user: {username}")
                 # Server error - try cache
                 try_cache = True
                 
