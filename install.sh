@@ -552,6 +552,99 @@ configure_standard_services() {
 
     # Sudo
     configure_pam_service "sudo" "Sudo"
+
+    # Ensure desktop integration is enabled in config
+    enable_desktop_integration_config "$dm_label"
+
+    # Optionally pre-provision desktop integration for a user now
+    echo ""
+    read -p "Pre-provision desktop integration for a user now? Enter username (blank to skip): " target_user
+    if [[ -n "$target_user" ]]; then
+        provision_desktop_for_user "$target_user" "$dm_label"
+    fi
+}
+
+# Ensure enable_desktop_integration is true and set force_desktop_type based on DM
+enable_desktop_integration_config() {
+    local dm_label="$1"  # e.g., GDM/LightDM/SDDM
+    local force_type=""
+    case "$dm_label" in
+        GDM|LightDM) force_type="gnome" ;;
+        SDDM) force_type="kde" ;;
+        *) force_type="" ;;
+    esac
+
+    if [[ -f "$CONFIG_DIR/$CONFIG_NAME" ]]; then
+        # enable_desktop_integration = true (insert under [nextcloud] if missing)
+        if grep -q "^enable_desktop_integration\s*=\s*" "$CONFIG_DIR/$CONFIG_NAME"; then
+            sed -i "s/^enable_desktop_integration\s*=.*/enable_desktop_integration = true/" "$CONFIG_DIR/$CONFIG_NAME"
+        else
+            awk 'BEGIN{done=0} {print $0} $0=="[nextcloud]" && !done {print "enable_desktop_integration = true"; done=1}' "$CONFIG_DIR/$CONFIG_NAME" > "$CONFIG_DIR/$CONFIG_NAME.tmp" && mv "$CONFIG_DIR/$CONFIG_NAME.tmp" "$CONFIG_DIR/$CONFIG_NAME"
+        fi
+
+        # force_desktop_type = <type>
+        if [[ -n "$force_type" ]]; then
+            if grep -q "^force_desktop_type\s*=\s*" "$CONFIG_DIR/$CONFIG_NAME"; then
+                sed -i "s/^force_desktop_type\s*=.*/force_desktop_type = $force_type/" "$CONFIG_DIR/$CONFIG_NAME"
+            else
+                awk -v val="$force_type" 'BEGIN{done=0} {print $0} $0=="[nextcloud]" && !done {print "force_desktop_type = " val; done=1}' "$CONFIG_DIR/$CONFIG_NAME" > "$CONFIG_DIR/$CONFIG_NAME.tmp" && mv "$CONFIG_DIR/$CONFIG_NAME.tmp" "$CONFIG_DIR/$CONFIG_NAME"
+            fi
+        fi
+        print_success "Desktop integration enabled in $CONFIG_DIR/$CONFIG_NAME"
+    fi
+}
+
+# Pre-provision desktop integration files for a user (GNOME/KDE)
+provision_desktop_for_user() {
+    local user="$1"
+    local dm_label="$2"
+
+    # Resolve user home
+    local home_dir
+    home_dir=$(getent passwd "$user" | cut -d: -f6)
+    if [[ -z "$home_dir" || ! -d "$home_dir" ]]; then
+        print_warning "User $user or home directory not found; skipping pre-provision"
+        return
+    fi
+
+    # Read server URL from config
+    local server_url
+    server_url=$(awk -F'=' '/^url[ \t]*=/{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}' "$CONFIG_DIR/$CONFIG_NAME" | head -1)
+    if [[ -z "$server_url" ]]; then
+        print_warning "Nextcloud URL not set in $CONFIG_DIR/$CONFIG_NAME; skipping pre-provision"
+        return
+    fi
+
+    # Nextcloud Desktop Client hint
+    local nc_dir="$home_dir/.config/Nextcloud"
+    mkdir -p "$nc_dir"
+    cat > "$nc_dir/sync-hint.json" << EOF
+{
+  "server": "$server_url",
+  "user": "$user",
+  "configured_via": "pam_nextcloud",
+  "note": "This server was auto-detected from PAM authentication"
+}
+EOF
+    chown -R "$user":"$user" "$nc_dir"
+    chmod 700 "$nc_dir"
+    chmod 600 "$nc_dir/sync-hint.json"
+
+    # GNOME Online Accounts marker
+    local goa_dir="$home_dir/.config/goa-1.0"
+    mkdir -p "$goa_dir"
+    local marker="$goa_dir/.nextcloud-setup-$(date +%s)"
+    cat > "$marker" << EOF
+{
+  "username": "$user",
+  "server": "$server_url"
+}
+EOF
+    chown -R "$user":"$user" "$goa_dir"
+    chmod 700 "$goa_dir"
+    chmod 600 "$marker"
+
+    print_success "Pre-provisioned desktop integration for user $user"
 }
 
 # Main execution
