@@ -34,12 +34,14 @@ import configparser
 import requests
 from urllib.parse import urljoin
 import os
+import re
 import hashlib
 import json
 import time
 import subprocess
 from datetime import datetime, timedelta
 import pwd
+import grp
 
 
 class NextcloudAuth:
@@ -117,6 +119,172 @@ class NextcloudAuth:
             syslog.syslog(syslog.LOG_ERR,
                 f"pam_nextcloud: Error creating cache directory: {str(e)}")
             self.enable_cache = False
+
+
+# ---------------------
+# Provisioning helpers
+# ---------------------
+
+def _load_provisioning_config(config_path):
+    """Load provisioning settings from config file."""
+    cfg = {
+        'enable_user_provisioning': False,
+        'create_home': True,
+        'home_base_dir': '/home',
+        'default_shell': '/bin/bash',
+        'skel_dir': '/etc/skel',
+        'primary_group': None,
+        'extra_groups': []
+    }
+
+    try:
+        if not os.path.exists(config_path):
+            return cfg
+        parser = configparser.ConfigParser()
+        parser.read(config_path)
+        if 'provisioning' in parser:
+            section = parser['provisioning']
+            cfg['enable_user_provisioning'] = section.getboolean('enable_user_provisioning', fallback=False)
+            cfg['create_home'] = section.getboolean('create_home', fallback=True)
+            cfg['home_base_dir'] = section.get('home_base_dir', fallback='/home')
+            cfg['default_shell'] = section.get('default_shell', fallback='/bin/bash')
+            cfg['skel_dir'] = section.get('skel_dir', fallback='/etc/skel')
+            # Optional values
+            primary_group = section.get('primary_group', fallback='').strip()
+            cfg['primary_group'] = primary_group if primary_group else None
+            extra_groups = section.get('extra_groups', fallback='').strip()
+            if extra_groups:
+                cfg['extra_groups'] = [g.strip() for g in extra_groups.split(',') if g.strip()]
+    except Exception as e:
+        syslog.syslog(syslog.LOG_WARNING,
+            f"pam_nextcloud: Failed to read provisioning config: {str(e)}")
+    return cfg
+
+
+def _is_valid_username(username):
+    """Basic POSIX username validation."""
+    # Start with a letter or underscore; then letters, digits, underscores, hyphens
+    return bool(re.fullmatch(r'[a-z_][a-z0-9_-]*\$?', username))
+
+
+def _user_exists(username):
+    try:
+        pwd.getpwnam(username)
+        return True
+    except KeyError:
+        return False
+
+
+def _group_exists(group_name):
+    try:
+        grp.getgrnam(group_name)
+        return True
+    except KeyError:
+        return False
+
+
+def _ensure_group(group_name):
+    """Ensure a group exists; create if missing."""
+    try:
+        if _group_exists(group_name):
+            return True
+        subprocess.run(['groupadd', group_name], check=True, timeout=5)
+        syslog.syslog(syslog.LOG_INFO,
+            f"pam_nextcloud: Created group '{group_name}' for provisioning")
+        return True
+    except Exception as e:
+        syslog.syslog(syslog.LOG_WARNING,
+            f"pam_nextcloud: Failed to ensure group '{group_name}': {str(e)}")
+        return False
+
+
+def _create_local_user(username, prov_cfg):
+    """Create a local user account according to provisioning config."""
+    if not _is_valid_username(username):
+        syslog.syslog(syslog.LOG_WARNING,
+            f"pam_nextcloud: Refusing to provision invalid username: {username}")
+        return False
+
+    try:
+        # Build useradd command
+        home_dir = os.path.join(prov_cfg['home_base_dir'].rstrip('/'), username)
+        cmd = ['useradd']
+
+        if prov_cfg.get('create_home', True):
+            cmd.append('-m')
+        cmd.extend(['-d', home_dir])
+        cmd.extend(['-s', prov_cfg.get('default_shell', '/bin/bash')])
+
+        skel_dir = prov_cfg.get('skel_dir')
+        if skel_dir and os.path.isdir(skel_dir):
+            cmd.extend(['-k', skel_dir])
+
+        primary_group = prov_cfg.get('primary_group')
+        if primary_group:
+            if _ensure_group(primary_group):
+                cmd.extend(['-g', primary_group])
+
+        extra_groups = prov_cfg.get('extra_groups') or []
+        valid_groups = []
+        for g in extra_groups:
+            if _group_exists(g) or _ensure_group(g):
+                valid_groups.append(g)
+        if valid_groups:
+            cmd.extend(['-G', ','.join(valid_groups)])
+
+        cmd.append(username)
+
+        # Ensure base home directory exists
+        try:
+            os.makedirs(prov_cfg['home_base_dir'], mode=0o755, exist_ok=True)
+        except Exception:
+            pass
+
+        subprocess.run(cmd, check=True, timeout=10)
+        syslog.syslog(syslog.LOG_INFO,
+            f"pam_nextcloud: Provisioned local user '{username}' with home '{home_dir}'")
+        return True
+    except subprocess.CalledProcessError as e:
+        syslog.syslog(syslog.LOG_ERR,
+            f"pam_nextcloud: useradd failed for '{username}': {str(e)}")
+        return False
+    except Exception as e:
+        syslog.syslog(syslog.LOG_ERR,
+            f"pam_nextcloud: Unexpected error creating user '{username}': {str(e)}")
+        return False
+
+
+def _ensure_home_directory(username, prov_cfg):
+    """Ensure the user's home directory exists and has correct ownership."""
+    if not prov_cfg.get('create_home', True):
+        return True
+    try:
+        user_info = pwd.getpwnam(username)
+        home_dir = user_info.pw_dir
+        if not home_dir:
+            home_dir = os.path.join(prov_cfg['home_base_dir'].rstrip('/'), username)
+        if not os.path.isdir(home_dir):
+            os.makedirs(home_dir, mode=0o700, exist_ok=True)
+            try:
+                # Populate from skeleton if available
+                skel_dir = prov_cfg.get('skel_dir')
+                if skel_dir and os.path.isdir(skel_dir):
+                    subprocess.run(['cp', '-aT', skel_dir, home_dir], check=False, timeout=10)
+            except Exception:
+                pass
+        # Ensure ownership
+        try:
+            os.chown(home_dir, user_info.pw_uid, user_info.pw_gid)
+        except Exception:
+            pass
+        return True
+    except KeyError:
+        # User does not exist yet
+        return False
+    except Exception as e:
+        syslog.syslog(syslog.LOG_WARNING,
+            f"pam_nextcloud: Failed ensuring home for '{username}': {str(e)}")
+        return False
     
     def _get_cache_file_path(self, username):
         """
@@ -588,6 +756,25 @@ def pam_sm_authenticate(pamh, flags, argv):
         
         # Authenticate
         if _authenticator.authenticate(username, password):
+            # Provision local account if enabled and user missing
+            try:
+                user_missing = False
+                try:
+                    pwd.getpwnam(username)
+                except KeyError:
+                    user_missing = True
+                if user_missing:
+                    prov_cfg = _load_provisioning_config(config_path)
+                    if prov_cfg.get('enable_user_provisioning'):
+                        if _create_local_user(username, prov_cfg):
+                            # Attempt to ensure home as well
+                            _ensure_home_directory(username, prov_cfg)
+                        else:
+                            syslog.syslog(syslog.LOG_WARNING,
+                                f"pam_nextcloud: Provisioning failed for user: {username}")
+            except Exception as e:
+                syslog.syslog(syslog.LOG_WARNING,
+                    f"pam_nextcloud: Provisioning error for user {username}: {str(e)}")
             # Attempt to capture groups for use in session phase
             try:
                 groups = _authenticator.get_user_groups(username, password)
@@ -697,6 +884,15 @@ def pam_sm_open_session(pamh, flags, argv):
         if not username:
             return pamh.PAM_SUCCESS
         
+        # Ensure home directory exists if provisioning is enabled
+        try:
+            prov_cfg = _load_provisioning_config(config_path)
+            if prov_cfg.get('enable_user_provisioning'):
+                _ensure_home_directory(username, prov_cfg)
+        except Exception as e:
+            syslog.syslog(syslog.LOG_DEBUG,
+                f"pam_nextcloud: ensure home error for {username}: {str(e)}")
+
         # Run desktop integration script
         desktop_script = '/lib/security/pam_nextcloud_desktop.py'
         if os.path.exists(desktop_script):

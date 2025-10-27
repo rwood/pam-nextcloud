@@ -78,3 +78,28 @@ create_missing_groups = true
 #
 # If not mapped, groups will be created with the prefix (nc-groupname)
 
+
+[provisioning]
+# Automatically create a local Unix account on first successful Nextcloud login
+# Disabled by default to prevent unintended user creation
+# Set to true to enable auto-provisioning
+enable_user_provisioning = false
+
+# Create the user's home directory (if creating the account)
+# When true, the module will attempt to ensure the home directory exists
+create_home = true
+
+# Base directory for home folders (final home will be base/username)
+home_base_dir = /home
+
+# Default login shell for newly created users
+default_shell = /bin/bash
+
+# Skeleton directory to populate new home directories (used if present)
+skel_dir = /etc/skel
+
+# Primary group for new users (optional). If unset, a user-private group will be created
+# primary_group = users
+
+# Extra supplementary groups to add (comma-separated). Optional
+# extra_groups =
