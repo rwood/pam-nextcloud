@@ -330,6 +330,11 @@ DESKTOP_EOF
         chown root:root "$CONFIG_DIR/$CONFIG_NAME"
         print_success "Installed: $CONFIG_DIR/$CONFIG_NAME"
     fi
+
+    # Prompt for Nextcloud server URL and update config
+    if [[ -f "$CONFIG_DIR/$CONFIG_NAME" ]] && [[ "$AUTO_MODE" == false ]]; then
+        prompt_nextcloud_url
+    fi
     
     # Create cache directory (if it doesn't exist)
     print_info "Creating cache directory..."
@@ -369,6 +374,68 @@ DESKTOP_EOF
     fi
     echo ""
     print_warning "IMPORTANT: Always keep a root shell open when testing PAM configuration!"
+}
+
+# Prompt for Nextcloud URL and update the configuration file
+prompt_nextcloud_url() {
+    echo ""
+    print_header "Nextcloud Server Configuration"
+
+    local current_url
+    current_url=$(awk -F'=' '/^url[ \t]*=/{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}' "$CONFIG_DIR/$CONFIG_NAME" | head -1)
+
+    local server_url=""
+    while true; do
+        if [[ -n "$current_url" ]]; then
+            read -p "Enter Nextcloud server URL [${current_url}]: " server_url
+            server_url=${server_url:-$current_url}
+        else
+            read -p "Enter Nextcloud server URL (e.g., https://cloud.example.com): " server_url
+        fi
+
+        # Basic validation
+        if [[ -z "$server_url" ]]; then
+            print_warning "URL cannot be empty."
+            continue
+        fi
+        if [[ ! "$server_url" =~ ^https?:// ]]; then
+            print_warning "URL should start with http:// or https://"
+            continue
+        fi
+        break
+    done
+
+    update_nextcloud_url_in_config "$server_url"
+}
+
+# Update the url key within the [nextcloud] section in the config
+update_nextcloud_url_in_config() {
+    local new_url="$1"
+    local tmp_file="$CONFIG_DIR/$CONFIG_NAME.tmp"
+
+    awk -v url="$new_url" '
+        BEGIN{insec=0; done=0}
+        /^\[nextcloud\]/{print; insec=1; next}
+        /^\[.*\]/{
+            if(insec && !done){print "url = " url; done=1}
+            insec=0
+        }
+        {
+            if(insec && $0 ~ /^url[ \t]*=/){
+                if(!done){print "url = " url; done=1}
+                next
+            }
+            print
+        }
+        END{ if(insec && !done){print "url = " url} }
+    ' "$CONFIG_DIR/$CONFIG_NAME" > "$tmp_file" && mv "$tmp_file" "$CONFIG_DIR/$CONFIG_NAME"
+
+    if [[ $? -eq 0 ]]; then
+        print_success "Updated Nextcloud URL in $CONFIG_DIR/$CONFIG_NAME"
+    else
+        print_warning "Failed to update URL; please edit $CONFIG_DIR/$CONFIG_NAME manually."
+        rm -f "$tmp_file" 2>/dev/null || true
+    fi
 }
 
 # Configure PAM interactively
