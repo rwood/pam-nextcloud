@@ -83,6 +83,20 @@ print_info() {
     echo -e "${BLUE}ℹ️  $1${NC}"
 }
 
+# Normalize line endings to LF for a given file
+normalize_line_endings() {
+    local target_file="$1"
+    if [[ -z "$target_file" || ! -f "$target_file" ]]; then
+        return
+    fi
+    if command -v dos2unix >/dev/null 2>&1; then
+        dos2unix -q "$target_file" || true
+    else
+        # Fallback: strip CR characters at EOL
+        sed -i 's/\r$//' "$target_file" || true
+    fi
+}
+
 # Check if running as root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -319,6 +333,8 @@ DESKTOP_EOF
                 # Make readable by all (but writable only by root) so desktop integration works
                 chmod 644 "$CONFIG_DIR/$CONFIG_NAME"
                 chown root:root "$CONFIG_DIR/$CONFIG_NAME"
+                # Ensure Linux line endings
+                normalize_line_endings "$CONFIG_DIR/$CONFIG_NAME"
                 print_success "Configuration file overwritten"
             fi
         fi
@@ -328,6 +344,8 @@ DESKTOP_EOF
         # Make readable by all (but writable only by root) so desktop integration works
         chmod 644 "$CONFIG_DIR/$CONFIG_NAME"
         chown root:root "$CONFIG_DIR/$CONFIG_NAME"
+        # Ensure Linux line endings
+        normalize_line_endings "$CONFIG_DIR/$CONFIG_NAME"
         print_success "Installed: $CONFIG_DIR/$CONFIG_NAME"
     fi
 
