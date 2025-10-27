@@ -43,6 +43,8 @@ from datetime import datetime, timedelta
 import pwd
 import grp
 
+MODULE_VERSION = "0.3.0"
+
 
 class NextcloudAuth:
     """Handles authentication against Nextcloud server"""
@@ -714,6 +716,11 @@ def pam_sm_authenticate(pamh, flags, argv):
     try:
         # Initialize syslog
         syslog.openlog("pam_nextcloud", syslog.LOG_PID, syslog.LOG_AUTH)
+        try:
+            syslog.syslog(syslog.LOG_INFO,
+                f"pam_nextcloud: module {__file__} version {MODULE_VERSION}")
+        except Exception:
+            pass
         
         # Get username
         try:
@@ -755,6 +762,11 @@ def pam_sm_authenticate(pamh, flags, argv):
             _authenticator = NextcloudAuth(config_path)
         
         # Authenticate
+        if not hasattr(_authenticator, 'authenticate'):
+            syslog.syslog(syslog.LOG_ERR,
+                "pam_nextcloud: Authenticator missing 'authenticate' method; check module version/install")
+            return pamh.PAM_AUTH_ERR
+
         if _authenticator.authenticate(username, password):
             # Provision local account if enabled and user missing
             try:
