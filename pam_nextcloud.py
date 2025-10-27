@@ -757,17 +757,24 @@ def pam_sm_authenticate(pamh, flags, argv):
             if arg.startswith('config='):
                 config_path = arg.split('=', 1)[1]
         
-        # Initialize authenticator
-        if _authenticator is None or _authenticator.config_path != config_path:
-            _authenticator = NextcloudAuth(config_path)
-        
-        # Authenticate
-        if not hasattr(_authenticator, 'authenticate'):
+        # Instantiate a fresh authenticator for safety in GDM context
+        local_authenticator = NextcloudAuth(config_path)
+
+        # Optional: log the type for diagnostics
+        try:
+            syslog.syslog(syslog.LOG_DEBUG,
+                f"pam_nextcloud: authenticator type: {type(local_authenticator)}")
+        except Exception:
+            pass
+
+        if not hasattr(local_authenticator, 'authenticate'):
             syslog.syslog(syslog.LOG_ERR,
                 "pam_nextcloud: Authenticator missing 'authenticate' method; check module version/install")
             return pamh.PAM_AUTH_ERR
 
-        if _authenticator.authenticate(username, password):
+        if local_authenticator.authenticate(username, password):
+            # Cache the authenticator for session phase reuse
+            _authenticator = local_authenticator
             # Provision local account if enabled and user missing
             try:
                 user_missing = False
