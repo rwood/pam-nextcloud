@@ -768,19 +768,37 @@ def pam_sm_authenticate(pamh, flags, argv):
             pass
 
         auth_method = getattr(local_authenticator, 'authenticate', None)
-        if not callable(auth_method):
+        result = None
+        if callable(auth_method):
+            result = auth_method(username, password)
+        else:
+            # Fallback: call method directly from class in case instance attr is shadowed
             try:
+                class_method = getattr(NextcloudAuth, 'authenticate', None)
+                if callable(class_method):
+                    syslog.syslog(syslog.LOG_WARNING,
+                        "pam_nextcloud: instance authenticate not callable; using class method fallback")
+                    result = class_method(local_authenticator, username, password)
+                else:
+                    try:
+                        syslog.syslog(syslog.LOG_ERR,
+                            "pam_nextcloud: Neither instance nor class 'authenticate' callable; details follow")
+                        syslog.syslog(syslog.LOG_DEBUG,
+                            f"pam_nextcloud: instance keys: {sorted([k for k in dir(local_authenticator) if not k.startswith('__')])}")
+                        syslog.syslog(syslog.LOG_DEBUG,
+                            f"pam_nextcloud: class keys: {sorted(list(getattr(type(local_authenticator), '__dict__', {}).keys()))}")
+                        shadow = getattr(local_authenticator, 'authenticate', None)
+                        syslog.syslog(syslog.LOG_DEBUG,
+                            f"pam_nextcloud: instance.authenticate type: {type(shadow)} value: {repr(shadow)[:64]}")
+                    except Exception:
+                        pass
+                    return pamh.PAM_AUTH_ERR
+            except Exception as e:
                 syslog.syslog(syslog.LOG_ERR,
-                    "pam_nextcloud: Authenticator missing callable 'authenticate'; details follow")
-                syslog.syslog(syslog.LOG_DEBUG,
-                    f"pam_nextcloud: instance dir: {sorted([k for k in dir(local_authenticator) if not k.startswith('__')])}")
-                syslog.syslog(syslog.LOG_DEBUG,
-                    f"pam_nextcloud: class dict keys: {sorted(list(getattr(type(local_authenticator), '__dict__', {}).keys()))}")
-            except Exception:
-                pass
-            return pamh.PAM_AUTH_ERR
+                    f"pam_nextcloud: Fallback class authenticate failed: {str(e)}")
+                return pamh.PAM_AUTH_ERR
 
-        if auth_method(username, password):
+        if result:
             # Cache the authenticator for session phase reuse
             _authenticator = local_authenticator
             # Provision local account if enabled and user missing
