@@ -63,8 +63,8 @@ class DesktopIntegration:
         """
         Configure GNOME Online Accounts for Nextcloud
         
-        This writes an entry to ~/.config/goa-1.0/accounts.conf so GNOME
-        recognizes a Nextcloud account. User may still need to confirm in GUI.
+        Note: This creates a basic configuration marker. The user will need to
+        complete authentication in GNOME Settings.
         
         Returns:
             bool: True if successful, False otherwise
@@ -73,84 +73,50 @@ class DesktopIntegration:
             # GOA configuration directory
             goa_dir = Path(self.home_dir) / '.config' / 'goa-1.0'
             goa_dir.mkdir(parents=True, exist_ok=True)
-            
-            accounts_file = goa_dir / 'accounts.conf'
-            
-            # Prepare values
-            identity = self.username
-            presentation_identity = f"{self.username}@{self.nextcloud_url.split('://',1)[-1]}"
-            base_uri = self.nextcloud_url
-            files_uri = f"{base_uri}/remote.php/webdav"
-            dav_uri = f"{base_uri}/remote.php/dav"
 
-            # Load existing or create new
-            parser = configparser.ConfigParser()
-            parser.optionxform = str  # preserve key casing
+            accounts_file = goa_dir / 'accounts.conf'
+
+            # Generate account ID marker for user to complete setup in UI
+            import hashlib
+            account_id = hashlib.md5(
+                f"{self.username}@{self.nextcloud_url}".encode()
+            ).hexdigest()[:16]
+
+            # If accounts.conf exists and already contains the server, skip
             if accounts_file.exists():
+                config = configparser.ConfigParser()
                 try:
-                    parser.read(accounts_file)
+                    config.read(accounts_file)
+                    for section in config.sections():
+                        if section.startswith('Account '):
+                            provider = config.get(section, 'Provider', fallback='')
+                            uri = config.get(section, 'Uri', fallback='')
+                            if provider == 'owncloud' and self.nextcloud_url in uri:
+                                print(f"GNOME Online Account already configured for {self.nextcloud_url}")
+                                return True
                 except Exception:
                     pass
 
-            # Check for existing Nextcloud account targeting same server
-            for section in parser.sections():
-                if section.startswith('Account '):
-                    provider = parser.get(section, 'Provider', fallback='')
-                    uri = parser.get(section, 'Uri', fallback='')
-                    if provider == 'owncloud' and uri.startswith(files_uri):
-                        print("GNOME Online Accounts: Account already present")
-                        return True
+            # Create marker file for session/user to complete setup
+            marker_file = goa_dir / f'.nextcloud-setup-{account_id}'
+            with open(marker_file, 'w') as f:
+                json.dump({
+                    'username': self.username,
+                    'server': self.nextcloud_url,
+                    'account_id': account_id
+                }, f)
 
-            # Find a new unique account section name
-            def next_account_index():
-                max_idx = -1
-                for sec in parser.sections():
-                    if sec.startswith('Account '):
-                        try:
-                            suffix = sec.split('Account ',1)[1]
-                            parts = suffix.split('_')
-                            num = int(parts[0]) if parts and parts[0].isdigit() else -1
-                            if num > max_idx:
-                                max_idx = num
-                        except Exception:
-                            continue
-                return max_idx + 1
+            os.chmod(marker_file, 0o600)
 
-            idx = next_account_index()
-            account_section = f"Account {idx}_0"
-            if account_section in parser:
-                # Fallback unique name
-                account_section = f"Account {idx}_1"
-
-            if account_section not in parser:
-                parser.add_section(account_section)
-
-            parser.set(account_section, 'Provider', 'owncloud')
-            parser.set(account_section, 'Identity', identity)
-            parser.set(account_section, 'PresentationIdentity', presentation_identity)
-            parser.set(account_section, 'Uri', files_uri)
-            parser.set(account_section, 'CalendarEnabled', 'true')
-            parser.set(account_section, 'CalDavUri', dav_uri)
-            parser.set(account_section, 'ContactsEnabled', 'true')
-            parser.set(account_section, 'CardDavUri', dav_uri)
-            parser.set(account_section, 'FilesEnabled', 'true')
-            parser.set(account_section, 'AcceptSslErrors', 'false')
-
-            # Write file safely
-            tmp_path = accounts_file.with_suffix('.conf.tmp')
-            with open(tmp_path, 'w') as f:
-                parser.write(f)
-            os.replace(tmp_path, accounts_file)
-
-            # Ownership and permissions
-            os.chmod(accounts_file, 0o600)
-
+            # Change ownership to user
             import pwd
             pw = pwd.getpwnam(self.username)
             os.chown(goa_dir, pw.pw_uid, pw.pw_gid)
-            os.chown(accounts_file, pw.pw_uid, pw.pw_gid)
+            os.chown(marker_file, pw.pw_uid, pw.pw_gid)
 
-            print("GNOME Online Accounts: accounts.conf updated with Nextcloud account")
+            print(f"GNOME Online Accounts: Setup marker created")
+            print(f"User should complete setup in GNOME Settings > Online Accounts")
+
             return True
             
         except Exception as e:
