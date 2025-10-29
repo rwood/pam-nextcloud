@@ -124,17 +124,56 @@ check_source_files() {
     fi
 }
 
+# Detect Linux distribution
+detect_distro() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        DISTRO=$ID
+        DISTRO_VERSION=$VERSION_ID
+    else
+        print_warning "Cannot detect Linux distribution, assuming generic Linux"
+        DISTRO="unknown"
+    fi
+}
+
 # Update Python dependencies
 update_python_dependencies() {
     print_info "Updating Python dependencies..."
     
+    detect_distro
+    
+    # Try to use system package manager first (for Debian/Ubuntu)
+    if [[ "$DISTRO" == "ubuntu" ]] || [[ "$DISTRO" == "debian" ]]; then
+        # Check if python3-requests package exists
+        if apt-cache show python3-requests &>/dev/null; then
+            print_info "Using system package manager to install python3-requests..."
+            apt-get update
+            apt-get install -y --only-upgrade python3-requests 2>/dev/null || apt-get install -y python3-requests
+            print_success "Python dependencies updated via apt"
+            return 0
+        fi
+    fi
+    
+    # Fallback to pip3 with --break-system-packages if needed
     if [[ -f "requirements.txt" ]]; then
-        pip3 install --upgrade -r requirements.txt
-        print_success "Python dependencies updated"
+        # Try without --break-system-packages first
+        if pip3 install --upgrade -r requirements.txt 2>/dev/null; then
+            print_success "Python dependencies updated"
+        else
+            # If that fails, try with --break-system-packages
+            print_warning "System Python is externally managed, using --break-system-packages"
+            pip3 install --upgrade --break-system-packages -r requirements.txt
+            print_success "Python dependencies updated"
+        fi
     else
         # Fallback: install requests if requirements.txt doesn't exist
-        pip3 install --upgrade requests
-        print_success "Python dependencies updated (requests)"
+        if pip3 install --upgrade requests 2>/dev/null; then
+            print_success "Python dependencies updated (requests)"
+        else
+            print_warning "System Python is externally managed, using --break-system-packages"
+            pip3 install --upgrade --break-system-packages requests
+            print_success "Python dependencies updated (requests)"
+        fi
     fi
 }
 

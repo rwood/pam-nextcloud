@@ -126,22 +126,37 @@ install_dependencies() {
         ubuntu|debian)
             apt-get update
             apt-get install -y libpam-python python3 python3-pip libnotify-bin
+            # Try to install python3-requests via apt first
+            if apt-cache show python3-requests &>/dev/null; then
+                apt-get install -y python3-requests || {
+                    # Fallback to pip3
+                    print_warning "python3-requests not available via apt, using pip3"
+                    pip3 install --break-system-packages requests || pip3 install requests
+                }
+            else
+                # Fallback to pip3
+                print_info "Installing requests via pip3..."
+                pip3 install --break-system-packages requests 2>/dev/null || pip3 install requests
+            fi
             ;;
         fedora|rhel|centos)
             dnf install -y pam_python python3 python3-pip libnotify
+            # Install Python dependencies
+            pip3 install --break-system-packages requests 2>/dev/null || pip3 install requests
             ;;
         arch|manjaro)
             pacman -S --noconfirm python-pam python python-pip libnotify
+            # Install Python dependencies
+            pip3 install requests
             ;;
         *)
             print_warning "Unsupported distribution: $DISTRO"
             print_info "Please install pam_python, Python 3, and libnotify manually"
+            # Try to install requests anyway
+            pip3 install --break-system-packages requests 2>/dev/null || pip3 install requests || true
             return 1
             ;;
     esac
-    
-    # Install Python dependencies
-    pip3 install requests
     
     print_success "Dependencies installed"
 }
