@@ -302,7 +302,7 @@ def create_user(username, create_home=True):
         
         cmd.extend([
             '-s', '/bin/bash',  # Default shell
-            '-c', f'Nextcloud user {username}',  # Comment (simplified, no colon)
+            '-c', 'Nextcloud user',  # Comment (simplified)
             username
         ])
         
