@@ -607,27 +607,43 @@ def main():
                         failed_count += 1
             print()
         
-        # Sync group membership if group exists locally
-        local_groups = get_local_groups()
-        if group_name in local_groups:
-            print(f"🔍 Syncing group membership for '{group_name}'...")
-            print()
+        # Sync group membership if group exists locally (after mapping)
+        if group_sync:
+            # Get mapped Linux groups
+            linux_groups = group_sync._get_mapped_groups(group_name)
             
-            if args.dry_run:
-                local_members = set(get_local_group_members(group_name))
-                nextcloud_members_set = set(group_members)
-                users_to_add = nextcloud_members_set - local_members
-                users_to_remove = local_members - nextcloud_members_set
-                
-                if users_to_add:
-                    print(f"  [DRY RUN] Would add: {', '.join(sorted(users_to_add))}")
-                if users_to_remove:
-                    print(f"  [DRY RUN] Would remove: {', '.join(sorted(users_to_remove))}")
-                if not users_to_add and not users_to_remove:
-                    print(f"  [DRY RUN] Group membership already synchronized")
-            else:
-                sync_group_membership(group_name, group_members, config, group_sync)
-            print()
+            # Check if any mapped group exists locally
+            sync_performed = False
+            for linux_group in linux_groups:
+                if group_sync._group_exists(linux_group):
+                    print(f"🔍 Syncing group membership for '{group_name}' -> '{linux_group}'...")
+                    print()
+                    
+                    # Get members from Nextcloud
+                    nextcloud_members = get_group_members(admin_username, admin_password, group_name, config)
+                    
+                    if args.dry_run:
+                        local_members = set(get_local_group_members(linux_group))
+                        nextcloud_members_set = set(group_members)
+                        users_to_add = nextcloud_members_set - local_members
+                        users_to_remove = local_members - nextcloud_members_set
+                        
+                        if users_to_add:
+                            print(f"  [DRY RUN] Would add: {', '.join(sorted(users_to_add))}")
+                        if users_to_remove:
+                            print(f"  [DRY RUN] Would remove: {', '.join(sorted(users_to_remove))}")
+                        if not users_to_add and not users_to_remove:
+                            print(f"  [DRY RUN] Group membership already synchronized")
+                    else:
+                        sync_group_membership(group_name, group_members, config, group_sync)
+                    
+                    sync_performed = True
+                    print()
+                    break
+            
+            if not sync_performed:
+                print(f"ℹ️  Group '{group_name}' has no local mapping or doesn't exist locally")
+                print()
         
         # Summary
         print("=" * 70)
