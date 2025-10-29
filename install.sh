@@ -236,8 +236,25 @@ fix_pam_file() {
         return 1
     fi
     
-    # Check if pam_nextcloud is configured in this file
-    if ! grep -q "pam_nextcloud" "$pam_file"; then
+    # Check if pam_nextcloud is configured in this file OR if it includes common-auth
+    # (common-auth might have pam_nextcloud configured)
+    local has_pam_nextcloud=false
+    local includes_common_auth=false
+    
+    if grep -q "pam_nextcloud" "$pam_file"; then
+        has_pam_nextcloud=true
+    fi
+    
+    if grep -q "^@include[[:space:]]+common-auth" "$pam_file"; then
+        # Check if common-auth has pam_nextcloud
+        if [[ -f "/etc/pam.d/common-auth" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
+            has_pam_nextcloud=true
+            includes_common_auth=true
+        fi
+    fi
+    
+    # Only process if pam_nextcloud is configured (directly or via common-auth)
+    if [[ "$has_pam_nextcloud" == false ]]; then
         return 1  # Not configured, skip
     fi
     
@@ -251,8 +268,32 @@ fix_pam_file() {
     local in_auth_section=0
     local nextcloud_added=0
     
+    # If file includes common-auth and common-auth has pam_nextcloud,
+    # we need to add pam_nextcloud directly to this file and replace the include
+    if [[ "$includes_common_auth" == true ]] && ! grep -q "auth\s\+.*pam_nextcloud\.py" "$pam_file"; then
+        # We'll add pam_nextcloud when we encounter the @include line
+        # Mark that we need to add it
+        nextcloud_added=-1  # Special flag: needs to be added before @include
+    fi
+    
     # Process the file line by line
     while IFS= read -r line || [[ -n "$line" ]]; do
+        # If we need to add pam_nextcloud before @include common-auth
+        if [[ "$nextcloud_added" == -1 ]] && [[ "$line" =~ ^@include[[:space:]]+common-auth ]] && [[ $in_auth_section -eq 1 ]]; then
+            # Add pam_nextcloud before this include
+            echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
+            nextcloud_added=1
+            changes_made=1
+            print_info "Added pam_nextcloud directly to $service_name (replacing common-auth include)"
+            # Now replace the include
+            print_info "Replacing @include common-auth with proper fallback in $service_name"
+            echo "auth    sufficient  pam_unix.so nullok_secure try_first_pass" >> "$temp_file"
+            echo "auth    requisite   pam_deny.so" >> "$temp_file"
+            echo "auth    required    pam_permit.so" >> "$temp_file"
+            changes_made=1
+            continue
+        fi
+        
         # Check if we're entering the auth section
         if [[ "$line" =~ ^auth[[:space:]] ]]; then
             in_auth_section=1
@@ -285,8 +326,16 @@ fix_pam_file() {
             continue
         fi
         
-        # Check for @include common-auth in auth section - this is problematic!
+        # Check for @include common-auth in auth section - ALWAYS replace this!
+        # Even if common-auth has pam_nextcloud, including it causes issues
         if [[ "$line" =~ ^@include[[:space:]]+common-auth ]] && [[ $in_auth_section -eq 1 ]]; then
+            # If we haven't added pam_nextcloud yet, add it now
+            if [[ "$nextcloud_added" != 1 ]]; then
+                echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
+                nextcloud_added=1
+                changes_made=1
+                print_info "Added pam_nextcloud directly to $service_name"
+            fi
             print_info "Replacing @include common-auth with proper fallback in $service_name"
             # Replace with proper fallback that won't force password check
             echo "auth    sufficient  pam_unix.so nullok_secure try_first_pass" >> "$temp_file"

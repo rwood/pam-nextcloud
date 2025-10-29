@@ -364,8 +364,25 @@ fix_pam_file() {
         return 1
     fi
     
-    # Check if pam_nextcloud is configured in this file
-    if ! grep -q "pam_nextcloud" "$pam_file"; then
+    # Check if pam_nextcloud is configured in this file OR if it includes common-auth
+    # (common-auth might have pam_nextcloud configured)
+    local has_pam_nextcloud=false
+    local includes_common_auth=false
+    
+    if grep -q "pam_nextcloud" "$pam_file"; then
+        has_pam_nextcloud=true
+    fi
+    
+    if grep -q "^@include[[:space:]]+common-auth" "$pam_file"; then
+        # Check if common-auth has pam_nextcloud
+        if [[ -f "/etc/pam.d/common-auth" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
+            has_pam_nextcloud=true
+            includes_common_auth=true
+        fi
+    fi
+    
+    # Only process if pam_nextcloud is configured (directly or via common-auth)
+    if [[ "$has_pam_nextcloud" == false ]]; then
         return 1  # Not configured, skip
     fi
     
@@ -424,8 +441,16 @@ fix_pam_file() {
             continue
         fi
         
-        # Check for @include common-auth in auth section - this is problematic!
+        # Check for @include common-auth in auth section - ALWAYS replace this!
+        # Even if common-auth has pam_nextcloud, including it causes issues
         if [[ "$line" =~ ^@include[[:space:]]+common-auth ]] && [[ $in_auth_section -eq 1 ]]; then
+            # If common-auth has pam_nextcloud but this file doesn't, add it now
+            if [[ "$includes_common_auth" == true ]] && [[ "$nextcloud_added" != 1 ]]; then
+                echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
+                nextcloud_added=1
+                changes_made=1
+                print_info "Added pam_nextcloud directly to $service_name"
+            fi
             print_info "Replacing @include common-auth with proper fallback in $service_name"
             # Replace with proper fallback that won't force password check
             echo "auth    sufficient  pam_unix.so nullok_secure try_first_pass" >> "$temp_file"
