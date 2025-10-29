@@ -617,6 +617,11 @@ update() {
     # Fix PAM configurations
     fix_pam_configurations
     
+    # Ensure /etc/skel has standard directories for new users
+    print_info "Ensuring /etc/skel is properly configured..."
+    setup_skel_directory
+    print_success "User skeleton directory configured"
+    
     echo ""
     print_success "Update complete!"
     echo ""
@@ -641,6 +646,36 @@ update() {
     print_info "You may want to test authentication:"
     echo "  test-pam-nextcloud --username YOUR_USERNAME"
     echo ""
+}
+
+# Set up /etc/skel with standard directories for new users
+setup_skel_directory() {
+    local skel_dir="/etc/skel"
+    
+    # Ensure /etc/skel exists
+    if [[ ! -d "$skel_dir" ]]; then
+        mkdir -p "$skel_dir"
+        chmod 755 "$skel_dir"
+        chown root:root "$skel_dir"
+    fi
+    
+    # Create standard directories if they don't exist
+    local standard_dirs=(
+        ".config"
+        ".cache"
+        ".local"
+        ".local/share"
+        ".local/state"
+    )
+    
+    for dir_name in "${standard_dirs[@]}"; do
+        local dir_path="$skel_dir/$dir_name"
+        if [[ ! -d "$dir_path" ]]; then
+            mkdir -p "$dir_path"
+            chmod 755 "$dir_path"
+            chown root:root "$dir_path"
+        fi
+    done
 }
 
 # Main execution

@@ -635,6 +635,11 @@ DESKTOP_EOF
     chown root:root /var/cache/pam_nextcloud
     print_success "Cache directory ready: /var/cache/pam_nextcloud"
     
+    # Ensure /etc/skel has standard directories for new users
+    print_info "Setting up /etc/skel for new user home directories..."
+    setup_skel_directory
+    print_success "User skeleton directory configured"
+    
     print_success "Installation complete!"
     echo ""
     
@@ -869,6 +874,36 @@ configure_common_password() {
         }
         print_info "Added password configuration to common-password"
     fi
+}
+
+# Set up /etc/skel with standard directories for new users
+setup_skel_directory() {
+    local skel_dir="/etc/skel"
+    
+    # Ensure /etc/skel exists
+    if [[ ! -d "$skel_dir" ]]; then
+        mkdir -p "$skel_dir"
+        chmod 755 "$skel_dir"
+        chown root:root "$skel_dir"
+    fi
+    
+    # Create standard directories if they don't exist
+    local standard_dirs=(
+        ".config"
+        ".cache"
+        ".local"
+        ".local/share"
+        ".local/state"
+    )
+    
+    for dir_name in "${standard_dirs[@]}"; do
+        local dir_path="$skel_dir/$dir_name"
+        if [[ ! -d "$dir_path" ]]; then
+            mkdir -p "$dir_path"
+            chmod 755 "$dir_path"
+            chown root:root "$dir_path"
+        fi
+    done
 }
 
 # Main execution
