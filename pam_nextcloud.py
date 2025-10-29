@@ -697,6 +697,37 @@ def pam_sm_open_session(pamh, flags, argv):
         if not username:
             return pamh.PAM_SUCCESS
         
+        # Ensure home directory structure exists with proper permissions
+        try:
+            user_info = pwd.getpwnam(username)
+            home_dir = user_info.pw_dir
+            uid = user_info.pw_uid
+            gid = user_info.pw_gid
+            
+            # Ensure home directory exists and has correct permissions
+            if os.path.exists(home_dir):
+                os.chown(home_dir, uid, gid)
+                os.chmod(home_dir, 0o755)
+                
+                # Create standard directories if they don't exist
+                standard_dirs = [
+                    '.config',
+                    '.cache',
+                    '.local',
+                    '.local/share',
+                    '.local/state'
+                ]
+                
+                for dir_name in standard_dirs:
+                    dir_path = os.path.join(home_dir, dir_name)
+                    if not os.path.exists(dir_path):
+                        os.makedirs(dir_path, mode=0o755, exist_ok=True)
+                    os.chown(dir_path, uid, gid)
+                    os.chmod(dir_path, 0o755)
+        except Exception as e:
+            syslog.syslog(syslog.LOG_WARNING,
+                f"pam_nextcloud: Could not set up home directory structure: {str(e)}")
+        
         # Run desktop integration script
         desktop_script = '/lib/security/pam_nextcloud_desktop.py'
         if os.path.exists(desktop_script):
