@@ -572,7 +572,9 @@ configure_pam_service() {
         cat > "$pam_file" << 'EOF'
 # PAM configuration for nextcloud authentication
 auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py
-auth    required    pam_unix.so try_first_pass
+auth    sufficient  pam_unix.so nullok_secure try_first_pass
+auth    requisite   pam_deny.so
+auth    required    pam_permit.so
 
 account required    pam_unix.so
 EOF
