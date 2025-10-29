@@ -53,13 +53,15 @@ force_desktop_type =
 enable_group_sync = true
 
 [group_sync]
-# Prefix for managed groups (optional, default: nc-)
-# Groups synced from Nextcloud will be prefixed with this
-prefix = nc-
+# Prefix for managed groups (optional, default: empty/no prefix)
+# Groups synced from Nextcloud will be prefixed with this if set
+# Leave empty or commented out to use Nextcloud group names directly
+# prefix = 
 
-# Enable automatic sudo mapping (optional, default: true)
+# Enable automatic sudo mapping (optional, default: false)
 # Maps Nextcloud admin groups to local sudo/wheel/admin group
-enable_sudo_mapping = true
+# Set to true to enable automatic mapping of admin/admins/administrators -> sudo
+enable_sudo_mapping = false
 
 # Create missing groups (optional, default: true)
 # Automatically create groups that don't exist on the system
@@ -76,5 +78,5 @@ create_missing_groups = true
 # staff = users
 # students = users
 #
-# If not mapped, groups will be created with the prefix (nc-groupname)
+# If not mapped, groups will be created with their Nextcloud names (normalized for Linux)
 
