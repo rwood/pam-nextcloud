@@ -10,6 +10,15 @@
 #   ./update.sh --interactive                  # Interactive mode with prompts
 #
 
+# Self-normalize line endings if this file has CRLF endings
+# This allows the script to run even if checked out with Windows line endings
+if command -v dos2unix >/dev/null 2>&1; then
+    dos2unix -q "$0" 2>/dev/null || true
+elif command -v sed >/dev/null 2>&1; then
+    # Fallback: strip CR characters
+    sed -i 's/\r$//' "$0" 2>/dev/null || true
+fi
+
 set -e  # Exit on error
 
 # Colors for output
