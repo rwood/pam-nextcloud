@@ -347,6 +347,154 @@ ensure_cache_directory() {
     fi
 }
 
+# Fix PAM configuration file to prevent local password checks after Nextcloud succeeds
+fix_pam_file() {
+    local pam_file="$1"
+    local service_name="$2"
+    
+    if [[ ! -f "$pam_file" ]]; then
+        return 1
+    fi
+    
+    # Check if pam_nextcloud is configured in this file
+    if ! grep -q "pam_nextcloud" "$pam_file"; then
+        return 1  # Not configured, skip
+    fi
+    
+    # Backup the file
+    local backup_file="${pam_file}.backup-$(date +%Y%m%d-%H%M%S)"
+    cp "$pam_file" "$backup_file"
+    
+    # Create temporary file for new configuration
+    local temp_file=$(mktemp)
+    local changes_made=0
+    local in_auth_section=0
+    local nextcloud_added=0
+    local nextcloud_line_num=0
+    local unix_line_num=0
+    
+    # Process the file line by line
+    local line_num=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_num=$((line_num + 1))
+        
+        # Check if we're entering the auth section
+        if [[ "$line" =~ ^auth[[:space:]] ]]; then
+            in_auth_section=1
+            
+            # Check for duplicate pam_nextcloud entries
+            if [[ "$line" =~ pam_nextcloud ]] && [[ $nextcloud_added -eq 1 ]]; then
+                print_info "Removing duplicate pam_nextcloud entry in $service_name"
+                changes_made=1
+                continue
+            fi
+            
+            # Track first pam_nextcloud entry
+            if [[ "$line" =~ pam_nextcloud ]]; then
+                echo "$line" >> "$temp_file"
+                nextcloud_added=1
+                nextcloud_line_num=$line_num
+                continue
+            fi
+            
+            # Track pam_unix line
+            if [[ "$line" =~ pam_unix ]]; then
+                unix_line_num=$line_num
+            fi
+            
+            # Fix pam_unix from 'required' to 'sufficient' if needed
+            if [[ "$line" =~ pam_unix ]] && [[ "$line" =~ required ]] && [[ ! "$line" =~ sufficient ]]; then
+                local modified_line=$(echo "$line" | sed 's/\brequired\b/sufficient/')
+                echo "$modified_line" >> "$temp_file"
+                print_info "Changed pam_unix from 'required' to 'sufficient' in $service_name"
+                changes_made=1
+                continue
+            fi
+            
+            # Keep other auth entries as-is
+            echo "$line" >> "$temp_file"
+            continue
+        fi
+        
+        # Check for @include common-auth in auth section - this is problematic!
+        if [[ "$line" =~ ^@include[[:space:]]+common-auth ]] && [[ $in_auth_section -eq 1 ]]; then
+            print_info "Replacing @include common-auth with proper fallback in $service_name"
+            # Replace with proper fallback that won't force password check
+            echo "auth    sufficient  pam_unix.so nullok_secure try_first_pass" >> "$temp_file"
+            echo "auth    requisite   pam_deny.so" >> "$temp_file"
+            echo "auth    required    pam_permit.so" >> "$temp_file"
+            changes_made=1
+            continue
+        fi
+        
+        # Check if we're leaving auth section
+        if [[ "$line" =~ ^(account|session|password|@include) ]] && [[ $in_auth_section -eq 1 ]]; then
+            in_auth_section=0
+        fi
+        
+        # Write all other lines as-is
+        echo "$line" >> "$temp_file"
+    done < "$pam_file"
+    
+    # If we made changes, replace the file
+    if [[ $changes_made -eq 1 ]]; then
+        mv "$temp_file" "$pam_file"
+        print_success "Fixed PAM configuration: $service_name"
+        return 0
+    else
+        rm -f "$temp_file"
+        rm -f "$backup_file"  # No changes, remove backup
+        return 1
+    fi
+}
+
+# Fix PAM configurations for all services
+fix_pam_configurations() {
+    print_header "Checking and Fixing PAM Configurations"
+    
+    local services_fixed=0
+    local services_checked=0
+    
+    # List of PAM service files to check
+    local pam_services=(
+        "/etc/pam.d/sddm:SDDM"
+        "/etc/pam.d/gdm-password:GDM"
+        "/etc/pam.d/gdm3:GDM3"
+        "/etc/pam.d/lightdm:LightDM"
+        "/etc/pam.d/sshd:SSH"
+        "/etc/pam.d/sudo:Sudo"
+        "/etc/pam.d/common-auth:Common Auth"
+    )
+    
+    for service_entry in "${pam_services[@]}"; do
+        local pam_file="${service_entry%%:*}"
+        local service_name="${service_entry##*:}"
+        
+        if [[ -f "$pam_file" ]]; then
+            services_checked=$((services_checked + 1))
+            if fix_pam_file "$pam_file" "$service_name"; then
+                services_fixed=$((services_fixed + 1))
+            fi
+        fi
+    done
+    
+    if [[ $services_fixed -gt 0 ]]; then
+        echo ""
+        print_success "Fixed PAM configurations for $services_fixed service(s)"
+        print_warning "Backups created with .backup-YYYYMMDD-HHMMSS extension"
+        echo ""
+        print_warning "IMPORTANT:"
+        echo "  • Test login in a separate terminal/session before closing this one"
+        echo "  • Keep a root shell open in case you need to revert"
+        echo "  • Backup files are in /etc/pam.d/*.backup-*"
+    elif [[ $services_checked -gt 0 ]]; then
+        print_info "All PAM configurations are already correct"
+    else
+        print_info "No PAM service files found with pam_nextcloud configured"
+    fi
+    echo ""
+}
+
 # Main update function
 update() {
     print_header "Updating PAM Nextcloud Module"
@@ -378,6 +526,9 @@ update() {
     # Ensure cache directory exists
     ensure_cache_directory
     
+    # Fix PAM configurations
+    fix_pam_configurations
+    
     echo ""
     print_success "Update complete!"
     echo ""
@@ -388,11 +539,12 @@ update() {
     echo "  • Desktop integration scripts"
     echo "  • Desktop autostart configurations"
     echo "  • Python dependencies"
+    echo "  • PAM configuration files (fixed common issues)"
     echo ""
     
     print_warning "IMPORTANT NOTES:"
     echo "  • Configuration file preserved (run with --interactive to update)"
-    echo "  • PAM configuration files were NOT modified"
+    echo "  • PAM configurations were checked and fixed if needed"
     echo "  • If you updated from a version with breaking changes, check:"
     echo "    - $CONFIG_DIR/$CONFIG_NAME for new options"
     echo "    - README.md for migration notes"
