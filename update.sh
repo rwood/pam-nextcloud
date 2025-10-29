@@ -480,8 +480,25 @@ fix_pam_configurations() {
         
         if [[ -f "$pam_file" ]]; then
             services_checked=$((services_checked + 1))
-            if fix_pam_file "$pam_file" "$service_name"; then
-                services_fixed=$((services_fixed + 1))
+            
+            # Check if pam_nextcloud is configured
+            if grep -q "pam_nextcloud" "$pam_file"; then
+                # Already configured, just fix any issues
+                if fix_pam_file "$pam_file" "$service_name"; then
+                    services_fixed=$((services_fixed + 1))
+                fi
+            else
+                # Not configured yet - offer to add it
+                print_info "$service_name PAM file exists but pam_nextcloud is not configured"
+                if [[ "$INTERACTIVE_MODE" == true ]]; then
+                    read -p "Add pam_nextcloud to $service_name? (y/N): " add_pam
+                    if [[ "$add_pam" =~ ^[Yy]$ ]]; then
+                        add_pam_nextcloud_to_file "$pam_file" "$service_name"
+                        services_fixed=$((services_fixed + 1))
+                    fi
+                else
+                    print_info "Run with --interactive to add pam_nextcloud to $service_name"
+                fi
             fi
         fi
     done
@@ -501,6 +518,37 @@ fix_pam_configurations() {
         print_info "No PAM service files found with pam_nextcloud configured"
     fi
     echo ""
+}
+
+# Add pam_nextcloud to a PAM file that doesn't have it yet
+add_pam_nextcloud_to_file() {
+    local pam_file="$1"
+    local service_name="$2"
+    
+    # Backup the file
+    local backup_file="${pam_file}.backup-$(date +%Y%m%d-%H%M%S)"
+    cp "$pam_file" "$backup_file"
+    
+    # Add pam_nextcloud at the beginning of auth section
+    if ! grep -q "auth\s\+.*pam_nextcloud\.py" "$pam_file"; then
+        # Insert after the first auth line or at the beginning of auth section
+        if grep -q "^auth" "$pam_file"; then
+            sed -i "/^auth.*/ a auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+                # If sed fails, prepend to file
+                echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" | cat - "$pam_file" > "${pam_file}.tmp" && mv "${pam_file}.tmp" "$pam_file"
+            }
+        else
+            # No auth section, add at beginning
+            echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" | cat - "$pam_file" > "${pam_file}.tmp" && mv "${pam_file}.tmp" "$pam_file"
+        fi
+        print_success "Added pam_nextcloud to $service_name"
+        
+        # Now fix any issues (like @include common-auth)
+        fix_pam_file "$pam_file" "$service_name" > /dev/null 2>&1
+        return 0
+    fi
+    
+    return 1
 }
 
 # Main update function
