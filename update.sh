@@ -217,6 +217,14 @@ update_test_script() {
         normalize_line_endings /usr/local/bin/test-pam-nextcloud
         print_success "Updated test script: /usr/local/bin/test-pam-nextcloud"
     fi
+    
+    # Update user provisioning script
+    if [[ -f "provision-nextcloud-users.py" ]]; then
+        cp provision-nextcloud-users.py /usr/local/bin/provision-nextcloud-users
+        chmod 755 /usr/local/bin/provision-nextcloud-users
+        normalize_line_endings /usr/local/bin/provision-nextcloud-users
+        print_success "Updated provisioning script: /usr/local/bin/provision-nextcloud-users"
+    fi
 }
 
 # Update desktop integration scripts

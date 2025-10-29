@@ -421,6 +421,13 @@ install() {
         print_success "Installed test script: /usr/local/bin/test-pam-nextcloud"
     fi
     
+    # Install user provisioning script
+    if [[ -f "provision-nextcloud-users.py" ]]; then
+        cp provision-nextcloud-users.py /usr/local/bin/provision-nextcloud-users
+        chmod 755 /usr/local/bin/provision-nextcloud-users
+        print_success "Installed provisioning script: /usr/local/bin/provision-nextcloud-users"
+    fi
+    
     # Install desktop integration scripts
     if [[ -f "gnome-nextcloud-setup.sh" ]]; then
         cp gnome-nextcloud-setup.sh /usr/local/bin/
