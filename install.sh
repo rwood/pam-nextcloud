@@ -201,6 +201,23 @@ uninstall() {
         print_success "Removed: /usr/local/bin/kde-nextcloud-setup.sh"
     fi
     
+    # Remove sync script
+    if [[ -f "/usr/local/bin/pam-nextcloud-sync" ]]; then
+        rm -f /usr/local/bin/pam-nextcloud-sync
+        print_success "Removed: /usr/local/bin/pam-nextcloud-sync"
+    fi
+    
+    # Remove old scripts if they exist
+    if [[ -f "/usr/local/bin/provision-nextcloud-users" ]]; then
+        rm -f /usr/local/bin/provision-nextcloud-users
+        print_success "Removed: /usr/local/bin/provision-nextcloud-users"
+    fi
+    
+    if [[ -f "/usr/local/bin/provision-nextcloud-groups" ]]; then
+        rm -f /usr/local/bin/provision-nextcloud-groups
+        print_success "Removed: /usr/local/bin/provision-nextcloud-groups"
+    fi
+    
     if [[ -f "/etc/xdg/autostart/gnome-nextcloud-setup.desktop" ]]; then
         rm -f /etc/xdg/autostart/gnome-nextcloud-setup.desktop
         print_success "Removed: /etc/xdg/autostart/gnome-nextcloud-setup.desktop"
@@ -540,19 +557,12 @@ install() {
         print_success "Installed test script: /usr/local/bin/test-pam-nextcloud"
     fi
     
-    # Install user provisioning script
-    if [[ -f "provision-nextcloud-users.py" ]]; then
-        cp provision-nextcloud-users.py /usr/local/bin/provision-nextcloud-users
-        chmod 755 /usr/local/bin/provision-nextcloud-users
-        normalize_line_endings /usr/local/bin/provision-nextcloud-users
-        print_success "Installed provisioning script: /usr/local/bin/provision-nextcloud-users"
-    fi
-    
-    if [[ -f "provision-nextcloud-groups.sh" ]]; then
-        cp provision-nextcloud-groups.sh /usr/local/bin/provision-nextcloud-groups
-        chmod 755 /usr/local/bin/provision-nextcloud-groups
-        normalize_line_endings /usr/local/bin/provision-nextcloud-groups
-        print_success "Installed group sync script: /usr/local/bin/provision-nextcloud-groups"
+    # Install sync script
+    if [[ -f "pam-nextcloud-sync.py" ]]; then
+        cp pam-nextcloud-sync.py /usr/local/bin/pam-nextcloud-sync
+        chmod 755 /usr/local/bin/pam-nextcloud-sync
+        normalize_line_endings /usr/local/bin/pam-nextcloud-sync
+        print_success "Installed sync script: /usr/local/bin/pam-nextcloud-sync"
     fi
     
     # Install desktop integration scripts
@@ -682,7 +692,7 @@ DESKTOP_EOF
     echo "  1. Edit $CONFIG_DIR/$CONFIG_NAME with your Nextcloud server details"
     echo "  2. (Optional) Enable offline authentication caching in config"
     echo "  3. Test authentication: test-pam-nextcloud --username YOUR_USERNAME"
-    echo "  4. (Optional) Run provision-nextcloud-groups.sh to sync groups on demand"
+    echo "  4. (Optional) Run pam-nextcloud-sync to sync users and groups on demand"
     if [[ "$AUTO_MODE" == false ]] && [[ ! "$configure_pam" =~ ^[Yy]$ ]]; then
         echo "  5. Configure PAM (see pam-config-examples/ directory)"
     fi

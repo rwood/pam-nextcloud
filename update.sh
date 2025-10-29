@@ -227,19 +227,12 @@ update_test_script() {
         print_success "Updated test script: /usr/local/bin/test-pam-nextcloud"
     fi
     
-    # Update user provisioning script
-    if [[ -f "provision-nextcloud-users.py" ]]; then
-        cp provision-nextcloud-users.py /usr/local/bin/provision-nextcloud-users
-        chmod 755 /usr/local/bin/provision-nextcloud-users
-        normalize_line_endings /usr/local/bin/provision-nextcloud-users
-        print_success "Updated provisioning script: /usr/local/bin/provision-nextcloud-users"
-    fi
-    
-    if [[ -f "provision-nextcloud-groups.sh" ]]; then
-        cp provision-nextcloud-groups.sh /usr/local/bin/provision-nextcloud-groups
-        chmod 755 /usr/local/bin/provision-nextcloud-groups
-        normalize_line_endings /usr/local/bin/provision-nextcloud-groups
-        print_success "Updated group sync script: /usr/local/bin/provision-nextcloud-groups"
+    # Update sync script
+    if [[ -f "pam-nextcloud-sync.py" ]]; then
+        cp pam-nextcloud-sync.py /usr/local/bin/pam-nextcloud-sync
+        chmod 755 /usr/local/bin/pam-nextcloud-sync
+        normalize_line_endings /usr/local/bin/pam-nextcloud-sync
+        print_success "Updated sync script: /usr/local/bin/pam-nextcloud-sync"
     fi
 }
 
