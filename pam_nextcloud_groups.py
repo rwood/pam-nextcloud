@@ -33,8 +33,8 @@ class GroupSync:
         """
         self.config_path = config_path
         self.group_mapping = {}
-        self.managed_groups_prefix = 'nc-'
-        self.enable_sudo_mapping = True
+        self.managed_groups_prefix = ''  # No prefix by default
+        self.enable_sudo_mapping = False  # Disabled by default
         self.create_missing_groups = True
         self.load_config()
     
@@ -55,8 +55,8 @@ class GroupSync:
             
             # Load other settings
             if config.has_section('group_sync'):
-                self.managed_groups_prefix = config.get('group_sync', 'prefix', fallback='nc-')
-                self.enable_sudo_mapping = config.getboolean('group_sync', 'enable_sudo_mapping', fallback=True)
+                self.managed_groups_prefix = config.get('group_sync', 'prefix', fallback='')  # Empty by default
+                self.enable_sudo_mapping = config.getboolean('group_sync', 'enable_sudo_mapping', fallback=False)  # Disabled by default
                 self.create_missing_groups = config.getboolean('group_sync', 'create_missing_groups', fallback=True)
             
         except Exception as e:
@@ -171,8 +171,8 @@ class GroupSync:
         normalized = ''.join(c if c.isalnum() or c in '-_' else '_' for c in nextcloud_group)
         normalized = normalized.lower().strip('_')
         
-        # Add prefix for managed groups
-        if not normalized.startswith(self.managed_groups_prefix):
+        # Add prefix only if configured (empty by default)
+        if self.managed_groups_prefix and not normalized.startswith(self.managed_groups_prefix):
             normalized = self.managed_groups_prefix + normalized
         
         return normalized
