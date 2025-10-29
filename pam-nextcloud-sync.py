@@ -557,7 +557,7 @@ def main():
         return 0
     
     else:
-        # Provision users from a group and sync that group
+        # Default mode: Provision users from a group, then sync all common groups
         if args.group:
             group_name = args.group
         else:
@@ -607,47 +607,9 @@ def main():
                         failed_count += 1
             print()
         
-        # Sync group membership if group exists locally (after mapping)
-        if group_sync:
-            # Get mapped Linux groups
-            linux_groups = group_sync._get_mapped_groups(group_name)
-            
-            # Check if any mapped group exists locally
-            sync_performed = False
-            for linux_group in linux_groups:
-                if group_sync._group_exists(linux_group):
-                    print(f"🔍 Syncing group membership for '{group_name}' -> '{linux_group}'...")
-                    print()
-                    
-                    # Get members from Nextcloud
-                    nextcloud_members = get_group_members(admin_username, admin_password, group_name, config)
-                    
-                    if args.dry_run:
-                        local_members = set(get_local_group_members(linux_group))
-                        nextcloud_members_set = set(group_members)
-                        users_to_add = nextcloud_members_set - local_members
-                        users_to_remove = local_members - nextcloud_members_set
-                        
-                        if users_to_add:
-                            print(f"  [DRY RUN] Would add: {', '.join(sorted(users_to_add))}")
-                        if users_to_remove:
-                            print(f"  [DRY RUN] Would remove: {', '.join(sorted(users_to_remove))}")
-                        if not users_to_add and not users_to_remove:
-                            print(f"  [DRY RUN] Group membership already synchronized")
-                    else:
-                        sync_group_membership(group_name, group_members, config, group_sync)
-                    
-                    sync_performed = True
-                    print()
-                    break
-            
-            if not sync_performed:
-                print(f"ℹ️  Group '{group_name}' has no local mapping or doesn't exist locally")
-                print()
-        
-        # Summary
+        # User provisioning summary
         print("=" * 70)
-        print("Summary")
+        print("User Provisioning Summary")
         print("=" * 70)
         print(f"  Total members in group: {len(group_members)}")
         if args.dry_run:
@@ -657,6 +619,145 @@ def main():
         print(f"  Already existed: {skipped_count}")
         if not args.dry_run:
             print(f"  Failed: {failed_count}")
+        print()
+        
+        if args.dry_run and created_count > 0:
+            print("⚠️  This was a dry run - no users were actually created")
+            print("   Run without --dry-run to create users and sync groups")
+            return 0
+        
+        # Now sync all groups that exist on both systems
+        if not group_sync:
+            print("⚠️  WARNING: GroupSync not available, cannot sync groups")
+            print()
+            if created_count > 0:
+                print("✅ User provisioning completed!")
+                print()
+                print("⚠️  IMPORTANT: Users were created without passwords.")
+                print("   Users should authenticate using their Nextcloud credentials.")
+                print("   Make sure PAM is configured to use pam_nextcloud for authentication.")
+            return 0 if failed_count == 0 else 1
+        
+        print("=" * 70)
+        print("Group Synchronization")
+        print("=" * 70)
+        print()
+        print("🔍 Retrieving groups from Nextcloud and local system...")
+        print()
+        
+        # Get all groups from both systems
+        nextcloud_groups = get_all_nextcloud_groups(admin_username, admin_password, config)
+        local_groups = get_local_groups()
+        local_groups_set = set(local_groups)
+        
+        # Find groups that exist on both systems (considering mapping)
+        common_groups = []
+        for nc_group in nextcloud_groups:
+            # Get mapped Linux groups
+            linux_groups = group_sync._get_mapped_groups(nc_group)
+            
+            # Check if any mapped group exists locally
+            for linux_group in linux_groups:
+                if linux_group in local_groups_set:
+                    common_groups.append((nc_group, linux_group))
+                    break
+        
+        if not common_groups:
+            print("⚠️  No common groups found between Nextcloud and local system")
+            print()
+            if created_count > 0:
+                print("✅ User provisioning completed!")
+                print()
+                print("⚠️  IMPORTANT: Users were created without passwords.")
+                print("   Users should authenticate using their Nextcloud credentials.")
+                print("   Make sure PAM is configured to use pam_nextcloud for authentication.")
+            return 0 if failed_count == 0 else 1
+        
+        print(f"✅ Found {len(common_groups)} common group(s)")
+        print()
+        
+        # Sync each common group
+        synced_count = 0
+        total_added = 0
+        total_removed = 0
+        
+        for nc_group, linux_group in sorted(common_groups):
+            print(f"Syncing group: {nc_group} -> {linux_group}")
+            
+            # Get members from Nextcloud
+            nextcloud_members = get_group_members(admin_username, admin_password, nc_group, config)
+            
+            # Get local group members
+            local_members = set(get_local_group_members(linux_group))
+            nextcloud_members_set = set(nextcloud_members)
+            
+            # Only sync users that exist on both systems
+            # Filter to only users that exist locally
+            nextcloud_members_local = {u for u in nextcloud_members_set if user_exists(u)}
+            
+            # Find users to add and remove
+            users_to_add = nextcloud_members_local - local_members
+            users_to_remove = local_members & {u for u in local_members if user_exists(u)} - nextcloud_members_local
+            
+            if args.dry_run:
+                if users_to_add:
+                    print(f"  [DRY RUN] Would add: {', '.join(sorted(users_to_add))}")
+                if users_to_remove:
+                    print(f"  [DRY RUN] Would remove: {', '.join(sorted(users_to_remove))}")
+                if not users_to_add and not users_to_remove:
+                    print(f"  [DRY RUN] Group membership already synchronized")
+            else:
+                changes_made = False
+                
+                # Add users to group
+                for username in users_to_add:
+                    if group_sync._add_user_to_group(username, linux_group):
+                        print(f"  ✅ Added '{username}' to group '{linux_group}'")
+                        total_added += 1
+                        changes_made = True
+                    else:
+                        print(f"  ❌ Failed to add '{username}' to group '{linux_group}'")
+                
+                # Remove users from group
+                for username in users_to_remove:
+                    result = subprocess.run(
+                        ['gpasswd', '-d', username, linux_group],
+                        capture_output=True,
+                        text=True,
+                        check=False
+                    )
+                    
+                    if result.returncode == 0:
+                        print(f"  ✅ Removed '{username}' from group '{linux_group}'")
+                        total_removed += 1
+                        changes_made = True
+                    else:
+                        print(f"  ⚠️  Failed to remove '{username}' from group '{linux_group}': {result.stderr.strip()}")
+                
+                if changes_made:
+                    synced_count += 1
+                else:
+                    print(f"  ℹ️  Group membership already synchronized")
+            print()
+        
+        # Final summary
+        print("=" * 70)
+        print("Summary")
+        print("=" * 70)
+        print(f"  Users provisioned:")
+        print(f"    Created: {created_count}")
+        print(f"    Already existed: {skipped_count}")
+        if not args.dry_run:
+            print(f"    Failed: {failed_count}")
+        print()
+        print(f"  Group synchronization:")
+        if args.dry_run:
+            print(f"    [DRY RUN] Would sync {len(common_groups)} group(s)")
+        else:
+            print(f"    Synced: {synced_count} group(s)")
+            print(f"    Users added to groups: {total_added}")
+            print(f"    Users removed from groups: {total_removed}")
+            print(f"    Total common groups: {len(common_groups)}")
         print()
         
         if args.dry_run:
