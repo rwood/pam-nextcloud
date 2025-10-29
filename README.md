@@ -95,46 +95,28 @@ timeout = 10
 
 **⚠️ WARNING**: Incorrect PAM configuration can lock you out of your system! Always keep a root shell open and test thoroughly before closing all sessions.
 
-#### Option A: SSH Authentication
+### PAM Configuration
 
-Edit `/etc/pam.d/sshd`:
-```bash
-# Add at the beginning of the auth section
-auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py
+The installation script configures `common-auth` which applies to all services that include it (SSH, sudo, desktop login, etc.).
 
-# Keep existing auth lines as fallback
-auth    sufficient  pam_unix.so nullok_secure try_first_pass
-```
+**Automatic Configuration:**
 
-Also configure `/etc/ssh/sshd_config`:
-```bash
-ChallengeResponseAuthentication yes
-UsePAM yes
-PasswordAuthentication yes
-```
+When you run `install.sh`, it will:
+1. Configure `/etc/pam.d/common-auth` with Nextcloud authentication
+2. Configure `/etc/pam.d/common-session` for desktop integration (if enabled)
+3. Configure `/etc/pam.d/common-password` for password changes
 
-Then restart SSH:
-```bash
-sudo systemctl restart sshd
-```
+Since most services (`sshd`, `sudo`, `sddm`, `gdm`, `lightdm`, etc.) use `@include common-auth`, configuring `common-auth` automatically applies to all of them.
 
-#### Option B: System Login (Console/TTY)
+**Manual Configuration:**
 
-Edit `/etc/pam.d/login`:
+If you prefer to configure manually, edit `/etc/pam.d/common-auth`:
 ```bash
 auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py
 auth    sufficient  pam_unix.so nullok_secure try_first_pass
+auth    requisite   pam_deny.so
+auth    required    pam_permit.so
 ```
-
-#### Option C: sudo Authentication
-
-Edit `/etc/pam.d/sudo`:
-```bash
-auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py
-auth    sufficient  pam_unix.so try_first_pass
-```
-
-Since we configure `common-auth`, this applies to all services that include it (SSH, sudo, desktop login, etc.).
 
 See the `pam-config-examples/common-auth` file for the complete configuration example.
 
