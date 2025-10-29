@@ -536,6 +536,7 @@ install() {
     if [[ -f "$TEST_SCRIPT" ]]; then
         cp "$TEST_SCRIPT" /usr/local/bin/test-pam-nextcloud
         chmod 755 /usr/local/bin/test-pam-nextcloud
+        normalize_line_endings /usr/local/bin/test-pam-nextcloud
         print_success "Installed test script: /usr/local/bin/test-pam-nextcloud"
     fi
     
@@ -543,12 +544,14 @@ install() {
     if [[ -f "provision-nextcloud-users.py" ]]; then
         cp provision-nextcloud-users.py /usr/local/bin/provision-nextcloud-users
         chmod 755 /usr/local/bin/provision-nextcloud-users
+        normalize_line_endings /usr/local/bin/provision-nextcloud-users
         print_success "Installed provisioning script: /usr/local/bin/provision-nextcloud-users"
     fi
     
     if [[ -f "provision-nextcloud-groups.sh" ]]; then
         cp provision-nextcloud-groups.sh /usr/local/bin/provision-nextcloud-groups
         chmod 755 /usr/local/bin/provision-nextcloud-groups
+        normalize_line_endings /usr/local/bin/provision-nextcloud-groups
         print_success "Installed group sync script: /usr/local/bin/provision-nextcloud-groups"
     fi
     
@@ -556,12 +559,14 @@ install() {
     if [[ -f "gnome-nextcloud-setup.sh" ]]; then
         cp gnome-nextcloud-setup.sh /usr/local/bin/
         chmod 755 /usr/local/bin/gnome-nextcloud-setup.sh
+        normalize_line_endings /usr/local/bin/gnome-nextcloud-setup.sh
         print_success "Installed: /usr/local/bin/gnome-nextcloud-setup.sh"
     fi
     
     if [[ -f "kde-nextcloud-setup.sh" ]]; then
         cp kde-nextcloud-setup.sh /usr/local/bin/
         chmod 755 /usr/local/bin/kde-nextcloud-setup.sh
+        normalize_line_endings /usr/local/bin/kde-nextcloud-setup.sh
         print_success "Installed: /usr/local/bin/kde-nextcloud-setup.sh"
     fi
     
