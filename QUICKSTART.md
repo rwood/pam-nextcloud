@@ -246,7 +246,7 @@ Once everything works:
    passwd
    ```
 
-3. **Configure sudo** if needed (see `pam-config-examples/sudo`)
+3. **Configure sudo** if needed (sudo uses `common-auth` automatically)
 
 4. **Set up access restrictions** using groups or PAM listfile
 
@@ -269,12 +269,12 @@ Once everything works:
    # In /etc/security/pam_nextcloud.conf
    enable_desktop_integration = true
    ```
-   Then configure PAM session hook (see `pam-config-examples/lightdm` or `gdm`)
+   Desktop integration is configured automatically via `common-session` when you run `install.sh`.
 
 ## Need Help?
 
 - Check the full [README.md](README.md) for detailed documentation
-- Review [pam-config-examples/](pam-config-examples/) for more PAM configurations
+- Review `pam-config-examples/common-auth` and `pam-config-examples/passwd` for configuration examples
 - Test with `test-pam-nextcloud` or `test_nextcloud_auth.py`
 - Check logs: `sudo grep pam_nextcloud /var/log/auth.log`
 

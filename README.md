@@ -134,7 +134,9 @@ auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py
 auth    sufficient  pam_unix.so try_first_pass
 ```
 
-See the `pam-config-examples/` directory for complete configuration examples.
+Since we configure `common-auth`, this applies to all services that include it (SSH, sudo, desktop login, etc.).
+
+See the `pam-config-examples/common-auth` file for the complete configuration example.
 
 ## Configuration Options
 
