@@ -373,7 +373,18 @@ fix_pam_configurations() {
     local services_fixed=0
     local services_checked=0
     
-    # List of PAM service files to check
+    # First, check and fix common-auth (the main configuration)
+    if [[ -f "/etc/pam.d/common-auth" ]]; then
+        if grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
+            if fix_pam_file "/etc/pam.d/common-auth" "Common Auth"; then
+                services_fixed=$((services_fixed + 1))
+            fi
+            services_checked=$((services_checked + 1))
+        fi
+    fi
+    
+    # List of PAM service files that might include common-auth
+    # We fix any issues with @include common-auth, but don't add pam_nextcloud directly to these
     local pam_services=(
         "/etc/pam.d/sddm:SDDM"
         "/etc/pam.d/gdm-password:GDM"
@@ -381,37 +392,38 @@ fix_pam_configurations() {
         "/etc/pam.d/lightdm:LightDM"
         "/etc/pam.d/sshd:SSH"
         "/etc/pam.d/sudo:Sudo"
-        "/etc/pam.d/common-auth:Common Auth"
     )
     
-    for service_entry in "${pam_services[@]}"; do
-        local pam_file="${service_entry%%:*}"
-        local service_name="${service_entry##*:}"
-        
-        if [[ -f "$pam_file" ]]; then
-            services_checked=$((services_checked + 1))
+    # Check if common-auth has pam_nextcloud configured
+    local common_auth_has_pam_nextcloud=false
+    if [[ -f "/etc/pam.d/common-auth" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
+        common_auth_has_pam_nextcloud=true
+    fi
+    
+    # Only fix services if common-auth is configured
+    if [[ "$common_auth_has_pam_nextcloud" == true ]]; then
+        for service_entry in "${pam_services[@]}"; do
+            local pam_file="${service_entry%%:*}"
+            local service_name="${service_entry##*:}"
             
-            # Check if pam_nextcloud is configured
-            if grep -q "pam_nextcloud" "$pam_file"; then
-                # Already configured, just fix any issues
-                if fix_pam_file "$pam_file" "$service_name"; then
-                    services_fixed=$((services_fixed + 1))
-                fi
-            else
-                # Not configured yet - offer to add it
-                print_info "$service_name PAM file exists but pam_nextcloud is not configured"
-                if [[ "$AUTO_MODE" == false ]]; then
-                    read -p "Add pam_nextcloud to $service_name? (y/N): " add_pam
-                    if [[ "$add_pam" =~ ^[Yy]$ ]]; then
-                        add_pam_nextcloud_to_file "$pam_file" "$service_name"
+            if [[ -f "$pam_file" ]]; then
+                services_checked=$((services_checked + 1))
+                
+                # If service includes common-auth, fix any issues with the include
+                if grep -q "^@include[[:space:]]+common-auth" "$pam_file"; then
+                    # Fix any issues (like replacing @include with proper fallback if needed)
+                    if fix_pam_file "$pam_file" "$service_name"; then
                         services_fixed=$((services_fixed + 1))
                     fi
-                else
-                    print_info "Skipping $service_name (use interactive mode to configure)"
+                elif grep -q "pam_nextcloud" "$pam_file"; then
+                    # Service has pam_nextcloud directly configured, fix any issues
+                    if fix_pam_file "$pam_file" "$service_name"; then
+                        services_fixed=$((services_fixed + 1))
+                    fi
                 fi
             fi
-        fi
-    done
+        done
+    fi
     
     if [[ $services_fixed -gt 0 ]]; then
         echo ""
@@ -727,14 +739,6 @@ configure_pam_interactive() {
     
     print_info "This will configure common-auth for all services (SSH, sudo, desktop login, etc.)"
     print_info "Configuration will include: Authentication, Session, and Password change"
-    echo ""
-    
-    read -p "Configure PAM now? (Y/n): " configure_pam
-    if [[ "$configure_pam" =~ ^[Nn]$ ]]; then
-        print_info "Skipping PAM configuration"
-        print_info "You can configure PAM manually later using the examples in pam-config-examples/"
-        return
-    fi
     
     configure_common_auth
 }
