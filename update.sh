@@ -225,6 +225,13 @@ update_test_script() {
         normalize_line_endings /usr/local/bin/provision-nextcloud-users
         print_success "Updated provisioning script: /usr/local/bin/provision-nextcloud-users"
     fi
+    
+    if [[ -f "provision-nextcloud-groups.sh" ]]; then
+        cp provision-nextcloud-groups.sh /usr/local/bin/provision-nextcloud-groups
+        chmod 755 /usr/local/bin/provision-nextcloud-groups
+        normalize_line_endings /usr/local/bin/provision-nextcloud-groups
+        print_success "Updated group sync script: /usr/local/bin/provision-nextcloud-groups"
+    fi
 }
 
 # Update desktop integration scripts

@@ -525,6 +525,12 @@ install() {
         print_success "Installed provisioning script: /usr/local/bin/provision-nextcloud-users"
     fi
     
+    if [[ -f "provision-nextcloud-groups.sh" ]]; then
+        cp provision-nextcloud-groups.sh /usr/local/bin/provision-nextcloud-groups
+        chmod 755 /usr/local/bin/provision-nextcloud-groups
+        print_success "Installed group sync script: /usr/local/bin/provision-nextcloud-groups"
+    fi
+    
     # Install desktop integration scripts
     if [[ -f "gnome-nextcloud-setup.sh" ]]; then
         cp gnome-nextcloud-setup.sh /usr/local/bin/
@@ -644,8 +650,8 @@ DESKTOP_EOF
     print_info "Next steps:"
     echo "  1. Edit $CONFIG_DIR/$CONFIG_NAME with your Nextcloud server details"
     echo "  2. (Optional) Enable offline authentication caching in config"
-    echo "  3. (Optional) Enable group synchronization in config"
-    echo "  4. Test authentication: test-pam-nextcloud --username YOUR_USERNAME"
+    echo "  3. Test authentication: test-pam-nextcloud --username YOUR_USERNAME"
+    echo "  4. (Optional) Run provision-nextcloud-groups.sh to sync groups on demand"
     if [[ "$AUTO_MODE" == false ]] && [[ ! "$configure_pam" =~ ^[Yy]$ ]]; then
         echo "  5. Configure PAM (see pam-config-examples/ directory)"
     fi
@@ -715,71 +721,35 @@ update_nextcloud_url_in_config() {
     fi
 }
 
-# Configure PAM interactively
+# Configure PAM - only configure common-auth
 configure_pam_interactive() {
-    print_header "Configuring PAM"
+    print_header "Configuring PAM (Common Auth)"
     
-    echo "Select which PAM service to configure:"
-    echo "  1) SSH (sshd) - For SSH login"
-    echo "  2) Display Manager (lightdm/gdm/sddm) - For graphical login"
-    echo "  3) Common Auth - For all services"
-    echo "  4) Sudo - For sudo authentication"
-    echo "  5) Standard setup (SSHD + Display Manager + Sudo)"
-    echo "  6) Cancel"
+    print_info "This will configure common-auth for all services (SSH, sudo, desktop login, etc.)"
+    print_info "Configuration will include: Authentication, Session, and Password change"
     echo ""
-    read -p "Choice [1-5]: " pam_choice
     
-    case $pam_choice in
-        1)
-            configure_pam_service "sshd" "SSH"
-            ;;
-        2)
-            # Detect display manager
-            if command -v lightdm &> /dev/null || [[ -f /etc/pam.d/lightdm ]]; then
-                configure_pam_service "lightdm" "LightDM"
-            elif command -v gdm &> /dev/null || command -v gdm3 &> /dev/null || [[ -f /etc/pam.d/gdm-password ]]; then
-                configure_pam_service "gdm-password" "GDM"
-            elif command -v sddm &> /dev/null || [[ -f /etc/pam.d/sddm ]]; then
-                configure_pam_service "sddm" "SDDM"
-            else
-                print_warning "Could not detect display manager"
-                read -p "Enter PAM service name (e.g., lightdm, gdm-password, sddm): " service_name
-                if [[ -n "$service_name" ]]; then
-                    configure_pam_service "$service_name" "$service_name"
-                fi
-            fi
-            ;;
-        3)
-            configure_pam_service "common-auth" "Common Auth"
-            ;;
-        4)
-            configure_pam_service "sudo" "Sudo"
-            ;;
-        5)
-            configure_standard_services
-            ;;
-        6|*)
-            print_info "Cancelled PAM configuration"
-            return
-            ;;
-    esac
+    read -p "Configure PAM now? (Y/n): " configure_pam
+    if [[ "$configure_pam" =~ ^[Nn]$ ]]; then
+        print_info "Skipping PAM configuration"
+        print_info "You can configure PAM manually later using the examples in pam-config-examples/"
+        return
+    fi
+    
+    configure_common_auth
 }
 
-# Configure specific PAM service
-configure_pam_service() {
-    local service=$1
-    local service_name=$2
-    local pam_file="/etc/pam.d/$service"
+# Configure common-auth with all features enabled
+configure_common_auth() {
+    local pam_file="/etc/pam.d/common-auth"
+    local service_name="Common Auth"
     
     print_info "Configuring PAM for $service_name"
     
     # Check if PAM file exists
     if [[ ! -f "$pam_file" ]]; then
         print_warning "PAM file not found: $pam_file"
-        read -p "Create new file? (y/N): " create_file
-        if [[ ! "$create_file" =~ ^[Yy]$ ]]; then
-            return
-        fi
+        print_info "Creating new file..."
     fi
     
     # Backup existing file
@@ -788,15 +758,6 @@ configure_pam_service() {
         cp "$pam_file" "$backup_file"
         print_success "Backed up to: $backup_file"
     fi
-    
-    # Check what to configure
-    echo ""
-    echo "What would you like to enable?"
-    echo "  1) Authentication only"
-    echo "  2) Authentication + Session (for group sync & desktop integration)"
-    echo "  3) Authentication + Session + Password change"
-    echo ""
-    read -p "Choice [1-3]: " config_choice
     
     # Add authentication line (avoid duplicates)
     print_info "Adding authentication configuration..."
@@ -824,31 +785,33 @@ account required    pam_unix.so
 EOF
     fi
     
-    # Add session configuration if requested
-    if [[ "$config_choice" == "2" ]] || [[ "$config_choice" == "3" ]]; then
-        print_info "Adding session configuration (group sync & desktop integration)..."
-        
-        if ! grep -q "session.*pam_nextcloud" "$pam_file"; then
-            echo "session optional    pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
-        fi
+    # Add session configuration (for desktop integration only, no group sync)
+    print_info "Adding session configuration (desktop integration)..."
+    
+    if ! grep -q "session.*pam_nextcloud" "$pam_file"; then
+        echo "session optional    pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
     fi
     
-    # Add password configuration if requested
-    if [[ "$config_choice" == "3" ]]; then
-        print_info "Adding password change configuration..."
-        
-        if ! grep -q "password.*pam_nextcloud" "$pam_file"; then
-            sed -i "/^password.*/ a password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
-                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
-            }
-        fi
+    # Add password configuration
+    print_info "Adding password change configuration..."
+    
+    if ! grep -q "password.*pam_nextcloud" "$pam_file"; then
+        sed -i "/^password.*/ a password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+            echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+        }
     fi
+    
+    # Configure common-session if it exists
+    configure_common_session
+    
+    # Configure common-password if it exists
+    configure_common_password
     
     print_success "PAM configured for $service_name"
     
     # Show what was configured
     echo ""
-    print_info "Current configuration for $service:"
+    print_info "Current configuration for common-auth:"
     grep "pam_nextcloud" "$pam_file" || echo "  (no pam_nextcloud lines found - manual configuration may be needed)"
     
     echo ""
@@ -858,139 +821,50 @@ EOF
     echo "  3. Do NOT close this terminal until you've verified login works"
     echo "  4. If you get locked out, use the backup: $backup_file"
     echo ""
+}
+
+# Configure common-session for desktop integration
+configure_common_session() {
+    local pam_file="/etc/pam.d/common-session"
     
-    # Restart service if needed
-    if [[ "$service" == "sshd" ]]; then
-        read -p "Restart SSH service now? (y/N): " restart_ssh
-        if [[ "$restart_ssh" =~ ^[Yy]$ ]]; then
-            if systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null; then
-                print_success "SSH service restarted"
-            else
-                print_warning "Could not restart SSH service automatically"
-            fi
-        fi
-    fi
-}
-
-# Configure common services: sshd, desktop display manager, sudo
-configure_standard_services() {
-    print_header "Configuring PAM: Standard setup (SSHD + Display Manager + Sudo)"
-
-    # SSHD
-    configure_pam_service "sshd" "SSH"
-
-    # Detect display manager
-    local dm_service=""
-    local dm_label=""
-    if command -v lightdm &> /dev/null || [[ -f /etc/pam.d/lightdm ]]; then
-        dm_service="lightdm"; dm_label="LightDM"
-    elif command -v gdm &> /dev/null || command -v gdm3 &> /dev/null || [[ -f /etc/pam.d/gdm-password ]]; then
-        dm_service="gdm-password"; dm_label="GDM"
-    elif command -v sddm &> /dev/null || [[ -f /etc/pam.d/sddm ]]; then
-        dm_service="sddm"; dm_label="SDDM"
-    fi
-
-    if [[ -n "$dm_service" ]]; then
-        configure_pam_service "$dm_service" "$dm_label"
-    else
-        print_warning "No display manager detected; skipping desktop login configuration"
-    fi
-
-    # Sudo
-    configure_pam_service "sudo" "Sudo"
-
-    # Ensure desktop integration is enabled in config
-    enable_desktop_integration_config "$dm_label"
-
-    # Optionally pre-provision desktop integration for a user now
-    echo ""
-    read -p "Pre-provision desktop integration for a user now? Enter username (blank to skip): " target_user
-    if [[ -n "$target_user" ]]; then
-        provision_desktop_for_user "$target_user" "$dm_label"
-    fi
-}
-
-# Ensure enable_desktop_integration is true and set force_desktop_type based on DM
-enable_desktop_integration_config() {
-    local dm_label="$1"  # e.g., GDM/LightDM/SDDM
-    local force_type=""
-    case "$dm_label" in
-        GDM|LightDM) force_type="gnome" ;;
-        SDDM) force_type="kde" ;;
-        *) force_type="" ;;
-    esac
-
-    if [[ -f "$CONFIG_DIR/$CONFIG_NAME" ]]; then
-        # enable_desktop_integration = true (insert under [nextcloud] if missing)
-        if grep -q "^enable_desktop_integration\s*=\s*" "$CONFIG_DIR/$CONFIG_NAME"; then
-            sed -i "s/^enable_desktop_integration\s*=.*/enable_desktop_integration = true/" "$CONFIG_DIR/$CONFIG_NAME"
-        else
-            awk 'BEGIN{done=0} {print $0} $0=="[nextcloud]" && !done {print "enable_desktop_integration = true"; done=1}' "$CONFIG_DIR/$CONFIG_NAME" > "$CONFIG_DIR/$CONFIG_NAME.tmp" && mv "$CONFIG_DIR/$CONFIG_NAME.tmp" "$CONFIG_DIR/$CONFIG_NAME"
-        fi
-
-        # force_desktop_type = <type>
-        if [[ -n "$force_type" ]]; then
-            if grep -q "^force_desktop_type\s*=\s*" "$CONFIG_DIR/$CONFIG_NAME"; then
-                sed -i "s/^force_desktop_type\s*=.*/force_desktop_type = $force_type/" "$CONFIG_DIR/$CONFIG_NAME"
-            else
-                awk -v val="$force_type" 'BEGIN{done=0} {print $0} $0=="[nextcloud]" && !done {print "force_desktop_type = " val; done=1}' "$CONFIG_DIR/$CONFIG_NAME" > "$CONFIG_DIR/$CONFIG_NAME.tmp" && mv "$CONFIG_DIR/$CONFIG_NAME.tmp" "$CONFIG_DIR/$CONFIG_NAME"
-            fi
-        fi
-        print_success "Desktop integration enabled in $CONFIG_DIR/$CONFIG_NAME"
-    fi
-}
-
-# Pre-provision desktop integration files for a user (GNOME/KDE)
-provision_desktop_for_user() {
-    local user="$1"
-    local dm_label="$2"
-
-    # Resolve user home
-    local home_dir
-    home_dir=$(getent passwd "$user" | cut -d: -f6)
-    if [[ -z "$home_dir" || ! -d "$home_dir" ]]; then
-        print_warning "User $user or home directory not found; skipping pre-provision"
+    if [[ ! -f "$pam_file" ]]; then
         return
     fi
+    
+    # Backup existing file
+    if [[ -f "$pam_file" ]]; then
+        local backup_file="${pam_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp "$pam_file" "$backup_file"
+    fi
+    
+    # Add session configuration if not present
+    if ! grep -q "session.*pam_nextcloud" "$pam_file"; then
+        echo "session optional    pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+        print_info "Added session configuration to common-session"
+    fi
+}
 
-    # Read server URL from config
-    local server_url
-    server_url=$(awk -F'=' '/^url[ \t]*=/{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}' "$CONFIG_DIR/$CONFIG_NAME" | head -1)
-    if [[ -z "$server_url" ]]; then
-        print_warning "Nextcloud URL not set in $CONFIG_DIR/$CONFIG_NAME; skipping pre-provision"
+# Configure common-password for password changes
+configure_common_password() {
+    local pam_file="/etc/pam.d/common-password"
+    
+    if [[ ! -f "$pam_file" ]]; then
         return
     fi
-
-    # Nextcloud Desktop Client hint
-    local nc_dir="$home_dir/.config/Nextcloud"
-    mkdir -p "$nc_dir"
-    cat > "$nc_dir/sync-hint.json" << EOF
-{
-  "server": "$server_url",
-  "user": "$user",
-  "configured_via": "pam_nextcloud",
-  "note": "This server was auto-detected from PAM authentication"
-}
-EOF
-    chown -R "$user":"$user" "$nc_dir"
-    chmod 700 "$nc_dir"
-    chmod 600 "$nc_dir/sync-hint.json"
-
-    # GNOME Online Accounts marker
-    local goa_dir="$home_dir/.config/goa-1.0"
-    mkdir -p "$goa_dir"
-    local marker="$goa_dir/.nextcloud-setup-$(date +%s)"
-    cat > "$marker" << EOF
-{
-  "username": "$user",
-  "server": "$server_url"
-}
-EOF
-    chown -R "$user":"$user" "$goa_dir"
-    chmod 700 "$goa_dir"
-    chmod 600 "$marker"
-
-    print_success "Pre-provisioned desktop integration for user $user"
+    
+    # Backup existing file
+    if [[ -f "$pam_file" ]]; then
+        local backup_file="${pam_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp "$pam_file" "$backup_file"
+    fi
+    
+    # Add password configuration if not present
+    if ! grep -q "password.*pam_nextcloud" "$pam_file"; then
+        sed -i "/^password.*/ a password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+            echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+        }
+        print_info "Added password configuration to common-password"
+    fi
 }
 
 # Main execution
