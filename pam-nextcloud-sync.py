@@ -486,18 +486,29 @@ def ensure_accounts_service_entry(username, display_name=None):
         
         # Write the config file using ConfigParser with proper formatting
         # AccountsService expects a specific format
-        with open(user_file, 'w') as f:
-            config.write(f)
-            # Ensure file ends with newline
-            f.write('\n')
-        
-        # Set proper permissions (644 so AccountsService can read them)
-        # IMPORTANT: AccountsService runs as accounts-daemon user, needs read access
-        os.chmod(user_file, 0o644)
+        # Use temporary file to ensure correct permissions
+        temp_file = user_file + '.tmp'
         try:
+            with open(temp_file, 'w') as f:
+                config.write(f)
+                # Ensure file ends with newline
+                f.write('\n')
+            
+            # Set permissions BEFORE moving to final location
+            os.chmod(temp_file, 0o644)
+            os.rename(temp_file, user_file)
+        except Exception:
+            # Fallback: write directly
+            with open(user_file, 'w') as f:
+                config.write(f)
+                f.write('\n')
+            os.chmod(user_file, 0o644)
+        
+        # Ensure final file has correct permissions and ownership
+        try:
+            os.chmod(user_file, 0o644)
             os.chown(user_file, 0, 0)  # root:root
         except Exception:
-            # chown may fail on some systems, but file is still created
             pass
         
         return True
