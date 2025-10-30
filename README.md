@@ -102,8 +102,7 @@ The installation script configures `common-auth` which applies to all services t
 
 When you run `install.sh`, it will:
 1. Configure `/etc/pam.d/common-auth` with Nextcloud authentication
-2. Configure `/etc/pam.d/common-session` for desktop integration (if enabled)
-3. Configure `/etc/pam.d/common-password` for password changes
+2. Configure `/etc/pam.d/common-password` for password changes
 
 Since most services (`sshd`, `sudo`, `sddm`, `gdm`, `lightdm`, etc.) use `@include common-auth`, configuring `common-auth` automatically applies to all of them.
 
@@ -133,8 +132,6 @@ The configuration file (`/etc/security/pam_nextcloud.conf`) supports the followi
 | `enable_cache` | No | `false` | Enable offline authentication with password caching |
 | `cache_expiry_days` | No | `7` | Number of days before cached credentials expire (0 = never) |
 | `cache_directory` | No | `/var/cache/pam_nextcloud` | Directory to store cached credentials |
-| `enable_desktop_integration` | No | `false` | Automatically configure desktop environment Nextcloud integration |
-| `force_desktop_type` | No | auto-detect | Force desktop type: `gnome`, `kde`, or blank for auto-detect |
 | `enable_group_sync` | No | `false` | Automatically synchronize user groups from Nextcloud to Linux |
 
 ### PAM Module Arguments
@@ -370,71 +367,6 @@ The user will be prompted for:
 - The password change is immediate - no email confirmation required
 - Local Linux password remains unchanged (only Nextcloud password is updated)
 - If using both Nextcloud and local authentication, consider the implications of diverging passwords
-
-## Desktop Integration
-
-The module can automatically configure desktop environment integration with Nextcloud, including:
-- **GNOME Online Accounts** - Integrates with GNOME Files, Calendar, Contacts
-- **KDE Accounts** - Integrates with KDE applications
-- **Nextcloud Desktop Client** - Pre-fills server configuration
-
-### Quick Setup
-
-Enable in `/etc/security/pam_nextcloud.conf`:
-
-```ini
-[nextcloud]
-url = https://cloud.example.com
-
-# Enable desktop integration
-enable_desktop_integration = true
-```
-
-Configure PAM session hook in `/etc/pam.d/common-session` or `/etc/pam.d/lightdm`:
-
-```
-session optional pam_python.so /lib/security/pam_nextcloud.py
-```
-
-### User Experience
-
-When enabled:
-1. User logs into desktop session
-2. Integration markers are created automatically
-3. User receives notification to complete setup
-4. User opens Settings > Online Accounts
-5. Server URL and username are pre-filled
-6. User enters password
-7. Desktop integration complete!
-
-### What Gets Integrated
-
-**GNOME:**
-- Files (Nextcloud appears in file browser)
-- Calendar (events sync with GNOME Calendar)
-- Contacts (contacts sync with GNOME Contacts)
-- Documents (access Nextcloud documents)
-
-**KDE Plasma:**
-- KIO integration (access via `nextcloud://`)
-- Calendar (KOrganizer integration)
-- Contacts (KAddressBook integration)
-- Purpose framework integration
-
-**All Desktops:**
-- Nextcloud Desktop Client receives server hints
-- Simplified first-run configuration
-
-### Security
-
-Desktop integration is secure:
-- ✅ No passwords are stored
-- ✅ Only server URL and username are pre-filled
-- ✅ User must manually authenticate in desktop settings
-- ✅ Supports Nextcloud app passwords
-- ✅ Uses standard desktop authentication flows
-
-For detailed setup and troubleshooting, see **[DESKTOP_INTEGRATION.md](DESKTOP_INTEGRATION.md)**.
 
 ## Group Synchronization
 

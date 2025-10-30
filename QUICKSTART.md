@@ -264,12 +264,6 @@ Once everything works:
    ```
    See `GROUP_SYNC.md` for details
 
-8. **Optional - Enable desktop integration** (for GNOME/KDE desktop users):
-   ```ini
-   # In /etc/security/pam_nextcloud.conf
-   enable_desktop_integration = true
-   ```
-   Desktop integration is configured automatically via `common-session` when you run `install.sh`.
 
 ## Need Help?
 
