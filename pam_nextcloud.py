@@ -843,7 +843,30 @@ def pam_sm_chauthtok(pamh, flags, argv):
                 
                 # Verify old password
                 if _authenticator.authenticate(username, old_password):
-                    # Store old password for UPDATE phase (PAM will handle this)
+                    # Store old password for UPDATE phase
+                    # Try to set oldauthtok directly (if supported by PAM)
+                    try:
+                        pamh.oldauthtok = old_password
+                        syslog.syslog(syslog.LOG_INFO,
+                            f"pam_nextcloud: Stored old password in oldauthtok for user: {username}")
+                    except AttributeError:
+                        # Fallback: store in a temporary file if direct assignment not supported
+                        try:
+                            import pwd
+                            import os
+                            user_info = pwd.getpwnam(username)
+                            run_dir = f"/run/pam-nextcloud/{user_info.pw_uid}"
+                            os.makedirs(run_dir, mode=0o700, exist_ok=True)
+                            old_pass_file = os.path.join(run_dir, 'old_password')
+                            with open(old_pass_file, 'w') as f:
+                                f.write(old_password)
+                            os.chmod(old_pass_file, 0o600)
+                            syslog.syslog(syslog.LOG_INFO,
+                                f"pam_nextcloud: Stored old password in file for user: {username}")
+                        except Exception as e:
+                            syslog.syslog(syslog.LOG_WARNING,
+                                f"pam_nextcloud: Could not store old password: {str(e)}")
+                    
                     return pamh.PAM_SUCCESS
                 else:
                     syslog.syslog(syslog.LOG_WARNING,
@@ -860,10 +883,39 @@ def pam_sm_chauthtok(pamh, flags, argv):
             syslog.syslog(syslog.LOG_INFO,
                 f"pam_nextcloud: PAM_UPDATE_AUTHTOK called for user: {username}")
             try:
-                # Get old password (should be available from PRELIM_CHECK)
-                old_password = pamh.oldauthtok
+                # Get old password - try multiple sources
+                old_password = None
+                
+                # Try to get from oldauthtok first
+                try:
+                    old_password = pamh.oldauthtok
+                    if old_password:
+                        syslog.syslog(syslog.LOG_INFO,
+                            f"pam_nextcloud: Retrieved old password from oldauthtok for user: {username}")
+                except AttributeError:
+                    pass
+                
+                # If not available, try to read from temporary storage
                 if old_password is None:
-                    old_password = pamh.authtok
+                    try:
+                        import pwd
+                        import os
+                        user_info = pwd.getpwnam(username)
+                        run_dir = f"/run/pam-nextcloud/{user_info.pw_uid}"
+                        old_pass_file = os.path.join(run_dir, 'old_password')
+                        if os.path.exists(old_pass_file):
+                            with open(old_pass_file, 'r') as f:
+                                old_password = f.read().strip()
+                            # Remove file after reading for security
+                            try:
+                                os.remove(old_pass_file)
+                            except Exception:
+                                pass
+                            syslog.syslog(syslog.LOG_INFO,
+                                f"pam_nextcloud: Retrieved old password from file for user: {username}")
+                    except Exception as e:
+                        syslog.syslog(syslog.LOG_DEBUG,
+                            f"pam_nextcloud: Could not read stored old password: {str(e)}")
                 
                 if not old_password:
                     syslog.syslog(syslog.LOG_ERR,
