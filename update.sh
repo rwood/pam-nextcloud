@@ -373,10 +373,11 @@ fix_pam_file() {
         return 1
     fi
     
-    # Check if pam_nextcloud is configured in this file OR if it includes common-auth
-    # (common-auth might have pam_nextcloud configured)
+    # Check if pam_nextcloud is configured in this file OR if it includes common-auth/common-password
+    # (common-auth/common-password might have pam_nextcloud configured)
     local has_pam_nextcloud=false
     local includes_common_auth=false
+    local includes_common_password=false
     
     if grep -q "pam_nextcloud" "$pam_file"; then
         has_pam_nextcloud=true
@@ -387,6 +388,14 @@ fix_pam_file() {
         if [[ -f "/etc/pam.d/common-auth" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
             has_pam_nextcloud=true
             includes_common_auth=true
+        fi
+    fi
+    
+    if grep -q "^@include[[:space:]]+common-password" "$pam_file"; then
+        # Check if common-password has pam_nextcloud
+        if [[ -f "/etc/pam.d/common-password" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-password"; then
+            has_pam_nextcloud=true
+            includes_common_password=true
         fi
     fi
     
@@ -403,14 +412,38 @@ fix_pam_file() {
     local temp_file=$(mktemp)
     local changes_made=0
     local in_auth_section=0
+    local in_password_section=0
     local nextcloud_added=0
-    local nextcloud_line_num=0
-    local unix_line_num=0
+    local nextcloud_password_added=0
+    
+    # If file includes common-auth and common-auth has pam_nextcloud,
+    # we need to add pam_nextcloud directly to this file and replace the include
+    if [[ "$includes_common_auth" == true ]] && ! grep -q "auth\s\+.*pam_nextcloud\.py" "$pam_file"; then
+        # We'll add pam_nextcloud when we encounter the @include line
+        # Mark that we need to add it
+        nextcloud_added=-1  # Special flag: needs to be added before @include
+    fi
     
     # Process the file line by line
     local line_num=0
     while IFS= read -r line || [[ -n "$line" ]]; do
         line_num=$((line_num + 1))
+        
+        # If we need to add pam_nextcloud before @include common-auth
+        if [[ "$nextcloud_added" == -1 ]] && [[ "$line" =~ ^@include[[:space:]]+common-auth ]] && [[ $in_auth_section -eq 1 ]]; then
+            # Add pam_nextcloud before this include
+            echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
+            nextcloud_added=1
+            changes_made=1
+            print_info "Added pam_nextcloud directly to $service_name (replacing common-auth include)"
+            # Now replace the include
+            print_info "Replacing @include common-auth with proper fallback in $service_name"
+            echo "auth    sufficient  pam_unix.so nullok_secure try_first_pass" >> "$temp_file"
+            echo "auth    requisite   pam_deny.so" >> "$temp_file"
+            echo "auth    required    pam_permit.so" >> "$temp_file"
+            changes_made=1
+            continue
+        fi
         
         # Check if we're entering the auth section
         if [[ "$line" =~ ^auth[[:space:]] ]]; then
@@ -427,13 +460,7 @@ fix_pam_file() {
             if [[ "$line" =~ pam_nextcloud ]]; then
                 echo "$line" >> "$temp_file"
                 nextcloud_added=1
-                nextcloud_line_num=$line_num
                 continue
-            fi
-            
-            # Track pam_unix line
-            if [[ "$line" =~ pam_unix ]]; then
-                unix_line_num=$line_num
             fi
             
             # Fix pam_unix from 'required' to 'sufficient' if needed
@@ -453,8 +480,8 @@ fix_pam_file() {
         # Check for @include common-auth in auth section - ALWAYS replace this!
         # Even if common-auth has pam_nextcloud, including it causes issues
         if [[ "$line" =~ ^@include[[:space:]]+common-auth ]] && [[ $in_auth_section -eq 1 ]]; then
-            # If common-auth has pam_nextcloud but this file doesn't, add it now
-            if [[ "$includes_common_auth" == true ]] && [[ "$nextcloud_added" != 1 ]]; then
+            # If we haven't added pam_nextcloud yet, add it now
+            if [[ "$nextcloud_added" != 1 ]]; then
                 echo "auth    sufficient  pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
                 nextcloud_added=1
                 changes_made=1
@@ -469,9 +496,62 @@ fix_pam_file() {
             continue
         fi
         
-        # Check if we're leaving auth section
-        if [[ "$line" =~ ^(account|session|password|@include) ]] && [[ $in_auth_section -eq 1 ]]; then
-            in_auth_section=0
+        # Check if we're entering password section
+        if [[ "$line" =~ ^password[[:space:]] ]]; then
+            in_password_section=1
+            
+            # Check for duplicate pam_nextcloud password entries
+            if [[ "$line" =~ pam_nextcloud ]] && [[ $nextcloud_password_added -eq 1 ]]; then
+                print_info "Removing duplicate pam_nextcloud password entry in $service_name"
+                changes_made=1
+                continue
+            fi
+            
+            # Track first pam_nextcloud password entry
+            if [[ "$line" =~ pam_nextcloud ]]; then
+                echo "$line" >> "$temp_file"
+                nextcloud_password_added=1
+                continue
+            fi
+            
+            # If pam_unix comes before pam_nextcloud, we need to reorder
+            if [[ "$line" =~ pam_unix ]] && [[ $nextcloud_password_added -eq 0 ]]; then
+                # Add pam_nextcloud before pam_unix
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
+                nextcloud_password_added=1
+                changes_made=1
+                print_info "Added pam_nextcloud before pam_unix in password section: $service_name"
+            fi
+            
+            # Keep password entry as-is
+            echo "$line" >> "$temp_file"
+            continue
+        fi
+        
+        # Check for @include common-password in password section - handle similar to common-auth
+        if [[ "$line" =~ ^@include[[:space:]]+common-password ]] && [[ $in_password_section -eq 1 ]]; then
+            # If we haven't added pam_nextcloud password yet, add it now
+            if [[ "$nextcloud_password_added" != 1 ]]; then
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
+                nextcloud_password_added=1
+                changes_made=1
+                print_info "Added pam_nextcloud directly to $service_name password section"
+            fi
+            print_info "Replacing @include common-password with proper fallback in $service_name"
+            # Replace with proper fallback
+            echo "password sufficient pam_unix.so use_authtok" >> "$temp_file"
+            changes_made=1
+            continue
+        fi
+        
+        # Check if we're leaving auth or password sections
+        if [[ "$line" =~ ^(account|session|@include) ]]; then
+            if [[ $in_auth_section -eq 1 ]]; then
+                in_auth_section=0
+            fi
+            if [[ $in_password_section -eq 1 ]]; then
+                in_password_section=0
+            fi
         fi
         
         # Write all other lines as-is
@@ -497,45 +577,72 @@ fix_pam_configurations() {
     local services_fixed=0
     local services_checked=0
     
-    # List of PAM service files to check
+    # First, check and fix common-auth (the main configuration)
+    if [[ -f "/etc/pam.d/common-auth" ]]; then
+        if grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
+            if fix_pam_file "/etc/pam.d/common-auth" "Common Auth"; then
+                services_fixed=$((services_fixed + 1))
+            fi
+            services_checked=$((services_checked + 1))
+        fi
+    fi
+    
+    # Check and fix common-password (for password changes)
+    if [[ -f "/etc/pam.d/common-password" ]]; then
+        if grep -q "pam_nextcloud" "/etc/pam.d/common-password"; then
+            if fix_pam_file "/etc/pam.d/common-password" "Common Password"; then
+                services_fixed=$((services_fixed + 1))
+            fi
+            services_checked=$((services_checked + 1))
+        fi
+    fi
+    
+    # List of PAM service files that might include common-auth or common-password
+    # We fix any issues with @include directives, but don't add pam_nextcloud directly to these
     local pam_services=(
+        "/etc/pam.d/passwd:Passwd"
         "/etc/pam.d/sddm:SDDM"
         "/etc/pam.d/gdm-password:GDM"
         "/etc/pam.d/gdm3:GDM3"
         "/etc/pam.d/lightdm:LightDM"
         "/etc/pam.d/sshd:SSH"
         "/etc/pam.d/sudo:Sudo"
-        "/etc/pam.d/common-auth:Common Auth"
     )
     
-    for service_entry in "${pam_services[@]}"; do
-        local pam_file="${service_entry%%:*}"
-        local service_name="${service_entry##*:}"
-        
-        if [[ -f "$pam_file" ]]; then
-            services_checked=$((services_checked + 1))
+    # Check if common-auth or common-password has pam_nextcloud configured
+    local common_auth_has_pam_nextcloud=false
+    local common_password_has_pam_nextcloud=false
+    if [[ -f "/etc/pam.d/common-auth" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
+        common_auth_has_pam_nextcloud=true
+    fi
+    if [[ -f "/etc/pam.d/common-password" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-password"; then
+        common_password_has_pam_nextcloud=true
+    fi
+    
+    # Only fix services if common-auth or common-password is configured
+    if [[ "$common_auth_has_pam_nextcloud" == true ]] || [[ "$common_password_has_pam_nextcloud" == true ]]; then
+        for service_entry in "${pam_services[@]}"; do
+            local pam_file="${service_entry%%:*}"
+            local service_name="${service_entry##*:}"
             
-            # Check if pam_nextcloud is configured
-            if grep -q "pam_nextcloud" "$pam_file"; then
-                # Already configured, just fix any issues
-                if fix_pam_file "$pam_file" "$service_name"; then
-                    services_fixed=$((services_fixed + 1))
-                fi
-            else
-                # Not configured yet - offer to add it
-                print_info "$service_name PAM file exists but pam_nextcloud is not configured"
-                if [[ "$INTERACTIVE_MODE" == true ]]; then
-                    read -p "Add pam_nextcloud to $service_name? (y/N): " add_pam
-                    if [[ "$add_pam" =~ ^[Yy]$ ]]; then
-                        add_pam_nextcloud_to_file "$pam_file" "$service_name"
+            if [[ -f "$pam_file" ]]; then
+                services_checked=$((services_checked + 1))
+                
+                # If service includes common-auth or common-password, fix any issues
+                if grep -q "^@include[[:space:]]+common-auth" "$pam_file" || grep -q "^@include[[:space:]]+common-password" "$pam_file"; then
+                    # Fix any issues (like replacing @include with proper fallback if needed)
+                    if fix_pam_file "$pam_file" "$service_name"; then
                         services_fixed=$((services_fixed + 1))
                     fi
-                else
-                    print_info "Run with --interactive to add pam_nextcloud to $service_name"
+                elif grep -q "pam_nextcloud" "$pam_file"; then
+                    # Service has pam_nextcloud directly configured, fix any issues
+                    if fix_pam_file "$pam_file" "$service_name"; then
+                        services_fixed=$((services_fixed + 1))
+                    fi
                 fi
             fi
-        fi
-    done
+        done
+    fi
     
     if [[ $services_fixed -gt 0 ]]; then
         echo ""
