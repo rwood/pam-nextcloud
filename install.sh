@@ -431,6 +431,14 @@ fix_pam_file() {
         fi
         
         # Check if we're leaving auth or password sections
+        if [[ "$line" =~ ^(account|session|@include) ]]; then
+            if [[ $in_auth_section -eq 1 ]]; then
+                in_auth_section=0
+            fi
+            if [[ $in_password_section -eq 1 ]]; then
+                in_password_section=0
+            fi
+        fi
         
         # Write all other lines as-is
         echo "$line" >> "$temp_file"
