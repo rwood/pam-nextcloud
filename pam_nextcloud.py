@@ -641,24 +641,6 @@ def pam_sm_authenticate(pamh, flags, argv):
         
         # Authenticate
         if _authenticator.authenticate(username, password):
-            # Attempt to capture groups for use in session phase
-            try:
-                groups = _authenticator.get_user_groups(username, password)
-                if groups:
-                    try:
-                        user_info = pwd.getpwnam(username)
-                        run_dir = f"/run/pam-nextcloud/{user_info.pw_uid}"
-                        os.makedirs(run_dir, mode=0o700, exist_ok=True)
-                        groups_file = os.path.join(run_dir, 'groups.json')
-                        with open(groups_file, 'w') as f:
-                            json.dump({'groups': groups}, f)
-                        os.chmod(groups_file, 0o600)
-                    except Exception as e:
-                        syslog.syslog(syslog.LOG_DEBUG,
-                            f"pam_nextcloud: Unable to persist groups for session: {str(e)}")
-            except Exception as e:
-                syslog.syslog(syslog.LOG_DEBUG,
-                    f"pam_nextcloud: Unable to retrieve groups at auth phase: {str(e)}")
             return pamh.PAM_SUCCESS
         else:
             return pamh.PAM_AUTH_ERR
@@ -711,7 +693,7 @@ def pam_sm_open_session(pamh, flags, argv):
     """
     PAM session opening function
     
-    Handles group synchronization if enabled
+    Ensures home directory permissions are correct
     
     Args:
         pamh: PAM handle
@@ -724,20 +706,6 @@ def pam_sm_open_session(pamh, flags, argv):
     try:
         # Initialize syslog
         syslog.openlog("pam_nextcloud", syslog.LOG_PID, syslog.LOG_AUTH)
-        
-        # Parse module arguments for custom config path
-        config_path = '/etc/security/pam_nextcloud.conf'
-        for arg in argv:
-            if arg.startswith('config='):
-                config_path = arg.split('=', 1)[1]
-        
-        if not os.path.exists(config_path):
-            return pamh.PAM_SUCCESS
-        
-        config = configparser.ConfigParser()
-        config.read(config_path)
-        
-        enable_group_sync = config.getboolean('nextcloud', 'enable_group_sync', fallback=False)
         
         # Get username
         try:
@@ -780,95 +748,6 @@ def pam_sm_open_session(pamh, flags, argv):
         except Exception as e:
             syslog.syslog(syslog.LOG_WARNING,
                 f"pam_nextcloud: Could not fix home directory permissions: {str(e)}")
-        
-        # Group synchronization
-        if enable_group_sync:
-            try:
-                # Initialize authenticator
-                global _authenticator
-                if _authenticator is None or _authenticator.config_path != config_path:
-                    _authenticator = NextcloudAuth(config_path)
-                
-                # Get username (already retrieved above)
-                if not username:
-                    username = pamh.get_user(None)
-                
-                if not username:
-                    return pamh.PAM_SUCCESS
-                
-                # Try to get password from authtok
-                # Note: Password may not be available in session phase
-                password = None
-                try:
-                    password = pamh.authtok
-                except:
-                    pass
-                
-                nextcloud_groups = None
-                
-                if password:
-                    # Fetch groups from Nextcloud directly if password is available
-                    nextcloud_groups = _authenticator.get_user_groups(username, password)
-                else:
-                    # Fallback: try to read groups captured during auth phase
-                    try:
-                        user_info = pwd.getpwnam(username)
-                        run_dir = f"/run/pam-nextcloud/{user_info.pw_uid}"
-                        groups_file = os.path.join(run_dir, 'groups.json')
-                        if os.path.exists(groups_file):
-                            with open(groups_file, 'r') as f:
-                                data = json.load(f)
-                                nextcloud_groups = data.get('groups', [])
-                            # Remove file after reading to avoid reuse
-                            try:
-                                os.remove(groups_file)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                
-                if nextcloud_groups is not None and len(nextcloud_groups) > 0:
-                    # Run group sync script
-                    group_script = '/lib/security/pam_nextcloud_groups.py'
-                    if os.path.exists(group_script):
-                        try:
-                            # Fork and run in child process
-                            pid = os.fork()
-                            if pid == 0:
-                                # Child process
-                                try:
-                                    env = os.environ.copy()
-                                    env['PAM_USER'] = username
-                                    env['NEXTCLOUD_GROUPS'] = ','.join(nextcloud_groups)
-                                    
-                                    subprocess.run(
-                                        [sys.executable, group_script, username, ','.join(nextcloud_groups)],
-                                        env=env,
-                                        timeout=10,
-                                        capture_output=True
-                                    )
-                                except Exception:
-                                    pass
-                                finally:
-                                    os._exit(0)
-                            else:
-                                # Parent process - wait briefly for group sync
-                                # This is important so groups are available in the session
-                                import time
-                                time.sleep(0.5)
-                            
-                            syslog.syslog(syslog.LOG_INFO,
-                                f"pam_nextcloud: Group synchronization initiated for user: {username}")
-                        except Exception as e:
-                            syslog.syslog(syslog.LOG_WARNING,
-                                f"pam_nextcloud: Group synchronization error: {str(e)}")
-                elif nextcloud_groups is not None:
-                    syslog.syslog(syslog.LOG_INFO,
-                        f"pam_nextcloud: User {username} has no groups on Nextcloud")
-                
-            except Exception as e:
-                syslog.syslog(syslog.LOG_WARNING,
-                    f"pam_nextcloud: Group sync error: {str(e)}")
         
     except Exception as e:
         syslog.syslog(syslog.LOG_ERR,

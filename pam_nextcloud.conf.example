@@ -38,36 +38,4 @@ cache_expiry_days = 7
 cache_directory = /var/cache/pam_nextcloud
 
 
-# Group synchronization (optional, default: false)
-# Automatically sync user's Nextcloud groups to local Linux groups
-# Groups are created if they don't exist
-enable_group_sync = true
-
-[group_sync]
-# Prefix for managed groups (optional, default: empty/no prefix)
-# Groups synced from Nextcloud will be prefixed with this if set
-# Leave empty or commented out to use Nextcloud group names directly
-# prefix = 
-
-# Enable automatic sudo mapping (optional, default: false)
-# Maps Nextcloud admin groups to local sudo/wheel/admin group
-# Set to true to enable automatic mapping of admin/admins/administrators -> sudo
-enable_sudo_mapping = false
-
-# Create missing groups (optional, default: true)
-# Automatically create groups that don't exist on the system
-create_missing_groups = true
-
-[group_mapping]
-# Map Nextcloud groups to specific Linux groups
-# Format: nextcloud_group = linux_group1, linux_group2
-# Multiple Linux groups can be specified separated by commas
-#
-# Examples:
-# admins = sudo
-# developers = docker, sudo
-# staff = users
-# students = users
-#
-# If not mapped, groups will be created with their Nextcloud names (normalized for Linux)
 
