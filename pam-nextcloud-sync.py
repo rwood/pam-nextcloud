@@ -337,25 +337,77 @@ def user_exists(username):
 def lock_local_password(username):
     """Lock local password for a user so they can only use Nextcloud authentication
     
-    Sets a locked password entry (!) so AccountsService recognizes the account.
+    Sets a locked password entry so AccountsService recognizes the account.
     This is required for users to appear in GDM login screen.
+    
+    Strategy:
+    - AccountsService requires a valid password hash (not just '!')
+    - If account has no password hash, set an unguessable hash first
+    - Then use 'passwd -l' to lock it (preserves hash, prepends '!')
+    - This gives AccountsService: '!$6$salt$hash' which it recognizes
     """
     try:
-        # First, ensure there's a password entry (even if locked)
-        # This is critical for AccountsService to show the user in GDM
-        # Set password to '!' which means locked/disabled
-        result = subprocess.run(
-            ['usermod', '-p', '!', username],
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        import spwd
+        import secrets
         
-        if result.returncode == 0:
-            return True
-        
-        # If usermod -p fails, try passwd -l as fallback
-        # This works if the account already has a password set
+        try:
+            shadow_entry = spwd.getspnam(username)
+            current_hash = shadow_entry.sp_pwd if shadow_entry else ''
+            
+            # Check if password field is empty or just '!' or '*'
+            # These indicate no valid password hash exists
+            if not current_hash or current_hash in ('!', '*', ''):
+                # Account has no password hash - set one first
+                # Create an unguessable SHA-512 hash
+                salt = secrets.token_hex(8)
+                # Generate a random hash that will never match any password
+                # This is just a placeholder for AccountsService
+                unguessable_hash = '$6$' + salt + '$' + secrets.token_hex(32)
+                
+                # Set the hash first
+                result = subprocess.run(
+                    ['usermod', '-p', unguessable_hash, username],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                
+                if result.returncode != 0:
+                    # Failed to set hash, try fallback
+                    return False
+                
+                # Now lock it - passwd -l will prepend '!' to the hash
+                # Result: '!$6$salt$hash' which AccountsService recognizes
+                result2 = subprocess.run(
+                    ['passwd', '-l', username],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                return result2.returncode == 0
+            else:
+                # Account already has a password hash
+                # Check if it's already locked (starts with '!')
+                if current_hash.startswith('!'):
+                    # Already locked, nothing to do
+                    return True
+                
+                # Lock it - passwd -l preserves the hash and prepends '!'
+                result = subprocess.run(
+                    ['passwd', '-l', username],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                return result.returncode == 0
+                
+        except KeyError:
+            # User doesn't exist in shadow (shouldn't happen, but handle gracefully)
+            return False
+            
+    except ImportError:
+        # spwd not available, use simpler fallback
+        # Try passwd -l first (works if account has a password)
         result = subprocess.run(
             ['passwd', '-l', username],
             capture_output=True,
