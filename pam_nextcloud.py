@@ -10,7 +10,6 @@ Features:
     - User authentication against Nextcloud
     - Password change support (users can change their own passwords)
     - Offline authentication with secure password caching (7-day expiry)
-    - Group synchronization from Nextcloud (centralized group management)
     - SSL verification with configurable options
     - Timeout protection
     - Comprehensive syslog logging
@@ -36,7 +35,6 @@ import os
 import hashlib
 import json
 import time
-import subprocess
 from datetime import datetime, timedelta
 import pwd
 
