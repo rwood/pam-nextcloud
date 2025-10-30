@@ -414,15 +414,23 @@ fix_pam_file() {
             continue
         fi
         
-        # Check if we're leaving auth or password sections
-        if [[ "$line" =~ ^(account|session|@include) ]]; then
-            if [[ $in_auth_section -eq 1 ]]; then
-                in_auth_section=0
+        # Check for @include common-password in password section - handle similar to common-auth
+        if [[ "$line" =~ ^@include[[:space:]]+common-password ]] && [[ $in_password_section -eq 1 ]]; then
+            # If we haven't added pam_nextcloud password yet, add it now
+            if [[ "$nextcloud_password_added" != 1 ]]; then
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
+                nextcloud_password_added=1
+                changes_made=1
+                print_info "Added pam_nextcloud directly to $service_name password section"
             fi
-            if [[ $in_password_section -eq 1 ]]; then
-                in_password_section=0
-            fi
+            print_info "Replacing @include common-password with proper fallback in $service_name"
+            # Replace with proper fallback
+            echo "password sufficient pam_unix.so use_authtok" >> "$temp_file"
+            changes_made=1
+            continue
         fi
+        
+        # Check if we're leaving auth or password sections
         
         # Write all other lines as-is
         echo "$line" >> "$temp_file"
