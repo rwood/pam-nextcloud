@@ -292,7 +292,9 @@ fix_pam_file() {
     local temp_file=$(mktemp)
     local changes_made=0
     local in_auth_section=0
+    local in_password_section=0
     local nextcloud_added=0
+    local nextcloud_password_added=0
     
     # If file includes common-auth and common-auth has pam_nextcloud,
     # we need to add pam_nextcloud directly to this file and replace the include
@@ -371,9 +373,46 @@ fix_pam_file() {
             continue
         fi
         
-        # Check if we're leaving auth section
-        if [[ "$line" =~ ^(account|session|password|@include) ]] && [[ $in_auth_section -eq 1 ]]; then
-            in_auth_section=0
+        # Check if we're entering password section
+        if [[ "$line" =~ ^password[[:space:]] ]]; then
+            in_password_section=1
+            
+            # Check for duplicate pam_nextcloud password entries
+            if [[ "$line" =~ pam_nextcloud ]] && [[ $nextcloud_password_added -eq 1 ]]; then
+                print_info "Removing duplicate pam_nextcloud password entry in $service_name"
+                changes_made=1
+                continue
+            fi
+            
+            # Track first pam_nextcloud password entry
+            if [[ "$line" =~ pam_nextcloud ]]; then
+                echo "$line" >> "$temp_file"
+                nextcloud_password_added=1
+                continue
+            fi
+            
+            # If pam_unix comes before pam_nextcloud, we need to reorder
+            if [[ "$line" =~ pam_unix ]] && [[ $nextcloud_password_added -eq 0 ]]; then
+                # Add pam_nextcloud before pam_unix
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$temp_file"
+                nextcloud_password_added=1
+                changes_made=1
+                print_info "Added pam_nextcloud before pam_unix in password section: $service_name"
+            fi
+            
+            # Keep password entry as-is
+            echo "$line" >> "$temp_file"
+            continue
+        fi
+        
+        # Check if we're leaving auth or password sections
+        if [[ "$line" =~ ^(account|session|@include) ]]; then
+            if [[ $in_auth_section -eq 1 ]]; then
+                in_auth_section=0
+            fi
+            if [[ $in_password_section -eq 1 ]]; then
+                in_password_section=0
+            fi
         fi
         
         # Write all other lines as-is
@@ -403,6 +442,16 @@ fix_pam_configurations() {
     if [[ -f "/etc/pam.d/common-auth" ]]; then
         if grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
             if fix_pam_file "/etc/pam.d/common-auth" "Common Auth"; then
+                services_fixed=$((services_fixed + 1))
+            fi
+            services_checked=$((services_checked + 1))
+        fi
+    fi
+    
+    # Check and fix common-password (for password changes)
+    if [[ -f "/etc/pam.d/common-password" ]]; then
+        if grep -q "pam_nextcloud" "/etc/pam.d/common-password"; then
+            if fix_pam_file "/etc/pam.d/common-password" "Common Password"; then
                 services_fixed=$((services_fixed + 1))
             fi
             services_checked=$((services_checked + 1))
@@ -825,13 +874,22 @@ EOF
         echo "session optional    pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
     fi
     
-    # Add password configuration
+    # Add password configuration (must come before pam_unix)
     print_info "Adding password change configuration..."
     
     if ! grep -q "password.*pam_nextcloud" "$pam_file"; then
-        sed -i "/^password.*/ a password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
-            echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
-        }
+        # Insert before the first password line (usually pam_unix)
+        if grep -q "^password.*pam_unix" "$pam_file"; then
+            # Insert before pam_unix
+            sed -i "/^password.*pam_unix/ i password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+            }
+        else
+            # No existing password lines, add at beginning
+            sed -i "/^password.*/ a password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+            }
+        fi
     fi
     
     # Configure common-session if it exists
@@ -891,11 +949,20 @@ configure_common_password() {
         cp "$pam_file" "$backup_file"
     fi
     
-    # Add password configuration if not present
+    # Add password configuration if not present (must come before pam_unix)
     if ! grep -q "password.*pam_nextcloud" "$pam_file"; then
-        sed -i "/^password.*/ a password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
-            echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
-        }
+        # Insert before the first password line (usually pam_unix)
+        if grep -q "^password.*pam_unix" "$pam_file"; then
+            # Insert before pam_unix
+            sed -i "/^password.*pam_unix/ i password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+            }
+        else
+            # No existing password lines, add at beginning
+            sed -i "/^password.*/ a password sufficient pam_python.so /lib/security/pam_nextcloud.py" "$pam_file" || {
+                echo "password sufficient pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
+            }
+        fi
         print_info "Added password configuration to common-password"
     fi
 }
