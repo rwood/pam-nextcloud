@@ -408,7 +408,7 @@ class NextcloudAuth:
             
             # Nextcloud returns 200 OK on successful password change
             # But we need to check the OCS XML response for the actual status
-            syslog.syslog(syslog.LOG_DEBUG,
+            syslog.syslog(syslog.LOG_INFO,
                 f"pam_nextcloud: Password change API response status: {response.status_code}")
             
             if response.status_code == 200:
@@ -443,7 +443,7 @@ class NextcloudAuth:
                             error_msg = f"Password change failed: {message or f'Status code {statuscode}'}"
                             syslog.syslog(syslog.LOG_WARNING,
                                 f"pam_nextcloud: {error_msg} for user: {username}")
-                            syslog.syslog(syslog.LOG_DEBUG,
+                            syslog.syslog(syslog.LOG_INFO,
                                 f"pam_nextcloud: XML response: {response.text[:500]}")
                             return False
                     else:
@@ -456,19 +456,16 @@ class NextcloudAuth:
                             self._cache_password(username, new_password)
                         
                         return True
-                except ET.ParseError:
-                    # XML parsing failed, but HTTP 200 means something succeeded
-                    # Log a warning but assume success
+                except ET.ParseError as e:
+                    # XML parsing failed - log the response and assume failure to be safe
                     syslog.syslog(syslog.LOG_WARNING,
-                        f"pam_nextcloud: Could not parse XML response for password change, but HTTP 200: {username}")
+                        f"pam_nextcloud: Could not parse XML response for password change: {username}")
                     syslog.syslog(syslog.LOG_INFO,
-                        f"pam_nextcloud: Password changed successfully for user: {username}")
-                    
-                    # Update cache with new password
-                    if self.enable_cache:
-                        self._cache_password(username, new_password)
-                    
-                    return True
+                        f"pam_nextcloud: XML parse error: {str(e)}")
+                    syslog.syslog(syslog.LOG_INFO,
+                        f"pam_nextcloud: Response body: {response.text[:500]}")
+                    # Don't assume success - return False to be safe
+                    return False
                 except Exception as e:
                     # XML parsing had an unexpected error
                     syslog.syslog(syslog.LOG_ERR,
