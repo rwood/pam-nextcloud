@@ -1080,16 +1080,8 @@ def main():
             accounts_dir = '/var/lib/AccountsService/users'
             print(f"    📝 Checking AccountsService entries in {accounts_dir}...")
             
-            # Check and fix directory permissions first
-            try:
-                dir_stat = os.stat(accounts_dir)
-                dir_mode = dir_stat.st_mode & 0o777
-                if dir_mode != 0o755:
-                    print(f"      ⚠️  Directory permissions are {oct(dir_mode)[-3:]} (should be 755)")
-                    os.chmod(accounts_dir, 0o755)
-                    print(f"      ✅ Fixed directory permissions")
-            except Exception as e:
-                print(f"      ⚠️  Could not check directory permissions: {str(e)}")
+            # Note: accounts-daemon manages directory permissions (may reset to 700)
+            # This is normal behavior - what matters is SystemAccount and AccountType
             
             accounts_service_ok = True
             for username in sorted(group_members):
@@ -1097,31 +1089,27 @@ def main():
                     user_file = os.path.join(accounts_dir, username)
                     if os.path.exists(user_file):
                         try:
-                            # Check file permissions
-                            stat_info = os.stat(user_file)
-                            file_mode = stat_info.st_mode & 0o777  # Get last 3 octal digits
-                            file_mode_str = oct(file_mode)[-3:]
-                            
-                            # Fix permissions if not 644
-                            if file_mode != 0o644:
-                                print(f"      ⚠️  {username}: File permissions are {file_mode_str} (should be 644)")
-                                # Fix permissions
-                                os.chmod(user_file, 0o644)
-                                print(f"      ✅ Fixed permissions for {username}")
+                            # Note: accounts-daemon resets file permissions to 600, which is normal
+                            # The important settings are SystemAccount and AccountType
                             
                             config = configparser.ConfigParser()
                             config.read(user_file)
                             if 'User' in config:
                                 system_account = config.get('User', 'SystemAccount', fallback='true')
+                                account_type = config.get('User', 'AccountType', fallback='system')
+                                
                                 if system_account.lower() != 'false':
                                     print(f"      ⚠️  {username}: SystemAccount={system_account} (should be false)")
+                                    accounts_service_ok = False
+                                elif account_type.lower() != 'desktop':
+                                    print(f"      ⚠️  {username}: AccountType={account_type} (should be desktop)")
                                     accounts_service_ok = False
                                 else:
                                     real_name = config.get('User', 'RealName', fallback='')
                                     if real_name:
-                                        print(f"      ✅ {username}: SystemAccount=false, RealName={real_name}")
+                                        print(f"      ✅ {username}: SystemAccount=false, AccountType=desktop, RealName={real_name}")
                                     else:
-                                        print(f"      ✅ {username}: SystemAccount=false")
+                                        print(f"      ✅ {username}: SystemAccount=false, AccountType=desktop")
                             else:
                                 print(f"      ⚠️  {username}: Missing [User] section")
                                 accounts_service_ok = False
