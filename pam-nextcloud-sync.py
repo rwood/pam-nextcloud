@@ -468,11 +468,16 @@ def ensure_accounts_service_entry(username, display_name=None):
         
         # Set proper permissions
         os.chmod(user_file, 0o644)
-        os.chown(user_file, 0, 0)  # root:root
+        try:
+            os.chown(user_file, 0, 0)  # root:root
+        except Exception:
+            # chown may fail on some systems, but file is still created
+            pass
         
         return True
     except Exception as e:
-        # Silently fail - this is not critical
+        # Don't fail silently - log the error
+        print(f"  ⚠️  Warning: Could not create AccountsService entry for '{username}': {str(e)}")
         return False
 
 
@@ -642,10 +647,13 @@ def main():
     
     # Configure GDM to show user list if GDM is installed
     print("🔍 Checking for GDM (GNOME Display Manager)...")
-    if configure_gdm_user_list():
+    gdm_configured = configure_gdm_user_list()
+    if gdm_configured:
         print("✅ GDM configured to show user list on login screen")
+        print("   Configuration file: /etc/dconf/db/gdm.d/00-show-user-list")
+        print("   ⚠️  You may need to restart GDM: sudo systemctl restart gdm")
     else:
-        print("ℹ️  GDM not found or configuration skipped (not installed or dconf unavailable)")
+        print("ℹ️  GDM configuration skipped (GDM may not be installed or dconf unavailable)")
     print()
     
     # Initialize GroupSync if available
