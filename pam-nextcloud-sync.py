@@ -482,6 +482,7 @@ def ensure_accounts_service_entry(username, display_name=None):
             f.write('\n')
         
         # Set proper permissions
+        # AccountsService needs to read these files, so use 644 (readable by all)
         os.chmod(user_file, 0o644)
         try:
             os.chown(user_file, 0, 0)  # root:root
@@ -1059,6 +1060,15 @@ def main():
                     user_file = os.path.join(accounts_dir, username)
                     if os.path.exists(user_file):
                         try:
+                            # Check file permissions
+                            stat_info = os.stat(user_file)
+                            file_mode = oct(stat_info.st_mode)[-3:]
+                            if file_mode != '644':
+                                print(f"      ⚠️  {username}: File permissions are {file_mode} (should be 644)")
+                                # Fix permissions
+                                os.chmod(user_file, 0o644)
+                                print(f"      ✅ Fixed permissions for {username}")
+                            
                             config = configparser.ConfigParser()
                             config.read(user_file)
                             if 'User' in config:
