@@ -444,6 +444,13 @@ def ensure_accounts_service_entry(username, display_name=None):
         # Create directory if it doesn't exist
         os.makedirs(accounts_dir, mode=0o755, exist_ok=True)
         
+        # Ensure directory has correct permissions (755, readable by accounts-daemon)
+        try:
+            os.chmod(accounts_dir, 0o755)
+            os.chown(accounts_dir, 0, 0)  # root:root
+        except Exception:
+            pass
+        
         user_file = os.path.join(accounts_dir, username)
         
         # Read existing config if it exists
@@ -481,8 +488,8 @@ def ensure_accounts_service_entry(username, display_name=None):
             # Ensure file ends with newline
             f.write('\n')
         
-        # Set proper permissions
-        # AccountsService needs to read these files, so use 644 (readable by all)
+        # Set proper permissions (644 so AccountsService can read them)
+        # IMPORTANT: AccountsService runs as accounts-daemon user, needs read access
         os.chmod(user_file, 0o644)
         try:
             os.chown(user_file, 0, 0)  # root:root
