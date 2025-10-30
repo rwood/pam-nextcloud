@@ -1069,9 +1069,12 @@ def main():
                         try:
                             # Check file permissions
                             stat_info = os.stat(user_file)
-                            file_mode = oct(stat_info.st_mode)[-3:]
-                            if file_mode != '644':
-                                print(f"      ⚠️  {username}: File permissions are {file_mode} (should be 644)")
+                            file_mode = stat_info.st_mode & 0o777  # Get last 3 octal digits
+                            file_mode_str = oct(file_mode)[-3:]
+                            
+                            # Fix permissions if not 644
+                            if file_mode != 0o644:
+                                print(f"      ⚠️  {username}: File permissions are {file_mode_str} (should be 644)")
                                 # Fix permissions
                                 os.chmod(user_file, 0o644)
                                 print(f"      ✅ Fixed permissions for {username}")
