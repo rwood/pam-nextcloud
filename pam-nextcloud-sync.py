@@ -360,6 +360,46 @@ def lock_local_password(username):
         return False
 
 
+def ensure_accounts_service_entry(username, display_name=None):
+    """Ensure user has an AccountsService entry so they appear in GDM"""
+    try:
+        accounts_dir = '/var/lib/AccountsService/users'
+        
+        # Create directory if it doesn't exist
+        os.makedirs(accounts_dir, mode=0o755, exist_ok=True)
+        
+        user_file = os.path.join(accounts_dir, username)
+        
+        # Read existing config if it exists
+        config = configparser.ConfigParser()
+        if os.path.exists(user_file):
+            config.read(user_file)
+        
+        # Set or update User section
+        if 'User' not in config:
+            config.add_section('User')
+        
+        # Ensure SystemAccount is false (so user appears in GDM)
+        config.set('User', 'SystemAccount', 'false')
+        
+        # Set real name if provided
+        if display_name:
+            config.set('User', 'RealName', display_name)
+        
+        # Write the config file
+        with open(user_file, 'w') as f:
+            config.write(f)
+        
+        # Set proper permissions
+        os.chmod(user_file, 0o644)
+        os.chown(user_file, 0, 0)  # root:root
+        
+        return True
+    except Exception as e:
+        # Silently fail - this is not critical
+        return False
+
+
 def create_user(username, display_name=None, create_home=True):
     """Create a local Linux user account"""
     try:
@@ -383,6 +423,8 @@ def create_user(username, display_name=None, create_home=True):
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         
         if result.returncode == 0:
+            # Create AccountsService entry so user appears in GDM
+            ensure_accounts_service_entry(username, display_name)
             return True
         else:
             print(f"  ❌ Failed to create user '{username}': {result.stderr.strip()}")
@@ -688,6 +730,8 @@ def main():
                     else:
                         print(f"  ⚠️  Warning: Could not lock local password for '{username}'")
                         print(f"     User may need to run 'passwd -l {username}' manually")
+                    # Ensure AccountsService entry exists
+                    ensure_accounts_service_entry(username)
                 skipped_count += 1
             else:
                 # Get user display name from Nextcloud
