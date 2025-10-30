@@ -11,7 +11,6 @@ Features:
     - Password change support (users can change their own passwords)
     - Offline authentication with secure password caching (7-day expiry)
     - Group synchronization from Nextcloud (centralized group management)
-    - Desktop integration (GNOME Online Accounts, KDE Accounts)
     - SSL verification with configurable options
     - Timeout protection
     - Comprehensive syslog logging
@@ -712,7 +711,7 @@ def pam_sm_open_session(pamh, flags, argv):
     """
     PAM session opening function
     
-    Optionally sets up desktop integration for Nextcloud
+    Handles group synchronization if enabled
     
     Args:
         pamh: PAM handle
@@ -732,14 +731,12 @@ def pam_sm_open_session(pamh, flags, argv):
             if arg.startswith('config='):
                 config_path = arg.split('=', 1)[1]
         
-        # Check if desktop integration is enabled
         if not os.path.exists(config_path):
             return pamh.PAM_SUCCESS
         
         config = configparser.ConfigParser()
         config.read(config_path)
         
-        enable_desktop = config.getboolean('nextcloud', 'enable_desktop_integration', fallback=False)
         enable_group_sync = config.getboolean('nextcloud', 'enable_group_sync', fallback=False)
         
         # Get username
@@ -783,39 +780,6 @@ def pam_sm_open_session(pamh, flags, argv):
         except Exception as e:
             syslog.syslog(syslog.LOG_WARNING,
                 f"pam_nextcloud: Could not fix home directory permissions: {str(e)}")
-        
-        # Run desktop integration script
-        desktop_script = '/lib/security/pam_nextcloud_desktop.py'
-        if os.path.exists(desktop_script):
-            try:
-                # Run in background to avoid delaying login
-                env = os.environ.copy()
-                env['PAM_USER'] = username
-                
-                # Fork and run in child process
-                pid = os.fork()
-                if pid == 0:
-                    # Child process
-                    try:
-                        subprocess.run(
-                            [sys.executable, desktop_script, username],
-                            env=env,
-                            timeout=5,
-                            capture_output=True
-                        )
-                    except Exception:
-                        pass
-                    finally:
-                        os._exit(0)
-                else:
-                    # Parent process - don't wait
-                    pass
-                
-                syslog.syslog(syslog.LOG_INFO,
-                    f"pam_nextcloud: Desktop integration initiated for user: {username}")
-            except Exception as e:
-                syslog.syslog(syslog.LOG_WARNING,
-                    f"pam_nextcloud: Desktop integration error: {str(e)}")
         
         # Group synchronization
         if enable_group_sync:
@@ -1086,7 +1050,6 @@ if __name__ == "__main__":
     print("  - Password change support")
     print("  - Offline authentication with secure password caching")
     print("  - Group synchronization (manage sudo access from Nextcloud)")
-    print("  - Desktop integration (GNOME/KDE)")
     print("\nFor testing, you can use the NextcloudAuth class directly:")
     print("\n  auth = NextcloudAuth('/path/to/config')")
     print("  result = auth.authenticate('username', 'password')")

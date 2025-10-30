@@ -199,14 +199,6 @@ update_modules() {
         print_success "Updated: $MODULE_DIR/$MODULE_NAME"
     fi
     
-    # Update desktop integration module
-    if [[ -f "pam_nextcloud_desktop.py" ]]; then
-        cp pam_nextcloud_desktop.py "$MODULE_DIR/pam_nextcloud_desktop.py"
-        chmod 644 "$MODULE_DIR/pam_nextcloud_desktop.py"
-        chown root:root "$MODULE_DIR/pam_nextcloud_desktop.py"
-        normalize_line_endings "$MODULE_DIR/pam_nextcloud_desktop.py"
-        print_success "Updated: $MODULE_DIR/pam_nextcloud_desktop.py"
-    fi
     
     # Update group synchronization module
     if [[ -f "pam_nextcloud_groups.py" ]]; then
@@ -236,72 +228,7 @@ update_test_script() {
     fi
 }
 
-# Update desktop integration scripts
-update_desktop_scripts() {
-    print_info "Updating desktop integration scripts..."
-    
-    # Update GNOME setup script
-    if [[ -f "gnome-nextcloud-setup.sh" ]]; then
-        cp gnome-nextcloud-setup.sh /usr/local/bin/
-        chmod 755 /usr/local/bin/gnome-nextcloud-setup.sh
-        normalize_line_endings /usr/local/bin/gnome-nextcloud-setup.sh
-        print_success "Updated: /usr/local/bin/gnome-nextcloud-setup.sh"
-    fi
-    
-    # Update KDE setup script
-    if [[ -f "kde-nextcloud-setup.sh" ]]; then
-        cp kde-nextcloud-setup.sh /usr/local/bin/
-        chmod 755 /usr/local/bin/kde-nextcloud-setup.sh
-        normalize_line_endings /usr/local/bin/kde-nextcloud-setup.sh
-        print_success "Updated: /usr/local/bin/kde-nextcloud-setup.sh"
-    fi
-}
 
-# Update desktop autostart files
-update_autostart_files() {
-    print_info "Updating desktop autostart configurations..."
-    
-    # Update KDE autostart desktop file if script exists
-    if [[ -f "kde-nextcloud-setup.sh" ]]; then
-        mkdir -p /etc/xdg/autostart
-        
-        cat > /etc/xdg/autostart/kde-nextcloud-setup.desktop << 'DESKTOP_EOF'
-[Desktop Entry]
-Type=Application
-Name=Nextcloud Integration Setup
-Comment=Complete Nextcloud setup in System Settings (Online Accounts)
-Exec=/usr/local/bin/kde-nextcloud-setup.sh
-Hidden=false
-NoDisplay=false
-X-KDE-autostart-after=panel
-DESKTOP_EOF
-        
-        chmod 644 /etc/xdg/autostart/kde-nextcloud-setup.desktop
-        normalize_line_endings /etc/xdg/autostart/kde-nextcloud-setup.desktop
-        print_success "Updated: /etc/xdg/autostart/kde-nextcloud-setup.desktop"
-    fi
-    
-    # Update GNOME autostart desktop file if script exists
-    if [[ -f "gnome-nextcloud-setup.sh" ]]; then
-        mkdir -p /etc/xdg/autostart
-        
-        cat > /etc/xdg/autostart/gnome-nextcloud-setup.desktop << 'DESKTOP_EOF'
-[Desktop Entry]
-Type=Application
-Name=Nextcloud Integration Setup
-Comment=Complete Nextcloud setup in GNOME Settings
-Exec=/usr/local/bin/gnome-nextcloud-setup.sh
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Phase=Applications
-DESKTOP_EOF
-        
-        chmod 644 /etc/xdg/autostart/gnome-nextcloud-setup.desktop
-        normalize_line_endings /etc/xdg/autostart/gnome-nextcloud-setup.desktop
-        print_success "Updated: /etc/xdg/autostart/gnome-nextcloud-setup.desktop"
-    fi
-}
 
 # Handle configuration file update
 update_config_file() {
@@ -711,11 +638,6 @@ update() {
     # Update test script
     update_test_script
     
-    # Update desktop integration scripts
-    update_desktop_scripts
-    
-    # Update desktop autostart files
-    update_autostart_files
     
     # Handle configuration file
     update_config_file
@@ -738,8 +660,6 @@ update() {
     print_info "Updated components:"
     echo "  • PAM module files in $MODULE_DIR"
     echo "  • Test script: /usr/local/bin/test-pam-nextcloud"
-    echo "  • Desktop integration scripts"
-    echo "  • Desktop autostart configurations"
     echo "  • Python dependencies"
     echo "  • PAM configuration files (fixed common issues)"
     echo ""

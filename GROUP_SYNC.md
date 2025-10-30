@@ -572,7 +572,6 @@ class GroupSync:
 ## See Also
 
 - Main [README.md](README.md) for PAM module configuration
-- [DESKTOP_INTEGRATION.md](DESKTOP_INTEGRATION.md) for desktop integration
 - [Nextcloud User Provisioning API](https://docs.nextcloud.com/server/latest/admin_manual/configuration_user/user_provisioning_api.html)
 - Linux `groups(1)` and `groupadd(8)` man pages
 

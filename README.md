@@ -9,7 +9,6 @@ A PAM (Pluggable Authentication Modules) module that authenticates Linux users a
 - ✅ **Password change support** - Users can change their Nextcloud password via `passwd` command
 - ✅ **Offline authentication** - Secure password caching for up to 7 days when Nextcloud is unavailable
 - ✅ **Group synchronization** - Automatically sync user groups from Nextcloud (manage sudo access centrally!)
-- ✅ **Desktop integration** - Automatically configure GNOME Online Accounts and KDE accounts
 - ✅ Configurable SSL verification
 - ✅ Timeout protection
 - ✅ Comprehensive logging via syslog

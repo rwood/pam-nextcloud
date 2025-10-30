@@ -180,11 +180,6 @@ uninstall() {
         print_success "Removed module: $MODULE_DIR/$MODULE_NAME"
     fi
     
-    # Remove desktop integration files
-    if [[ -f "$MODULE_DIR/pam_nextcloud_desktop.py" ]]; then
-        rm -f "$MODULE_DIR/pam_nextcloud_desktop.py"
-        print_success "Removed: $MODULE_DIR/pam_nextcloud_desktop.py"
-    fi
     
     if [[ -f "$MODULE_DIR/pam_nextcloud_groups.py" ]]; then
         rm -f "$MODULE_DIR/pam_nextcloud_groups.py"
@@ -218,10 +213,6 @@ uninstall() {
         print_success "Removed: /usr/local/bin/provision-nextcloud-groups"
     fi
     
-    if [[ -f "/etc/xdg/autostart/gnome-nextcloud-setup.desktop" ]]; then
-        rm -f /etc/xdg/autostart/gnome-nextcloud-setup.desktop
-        print_success "Removed: /etc/xdg/autostart/gnome-nextcloud-setup.desktop"
-    fi
     
     # Ask about config file
     if [[ -f "$CONFIG_DIR/$CONFIG_NAME" ]]; then
@@ -612,13 +603,6 @@ install() {
     chown root:root "$MODULE_DIR/$MODULE_NAME"
     print_success "Installed: $MODULE_DIR/$MODULE_NAME"
     
-    # Install desktop integration module
-    if [[ -f "pam_nextcloud_desktop.py" ]]; then
-        cp pam_nextcloud_desktop.py "$MODULE_DIR/pam_nextcloud_desktop.py"
-        chmod 644 "$MODULE_DIR/pam_nextcloud_desktop.py"
-        chown root:root "$MODULE_DIR/pam_nextcloud_desktop.py"
-        print_success "Installed: $MODULE_DIR/pam_nextcloud_desktop.py"
-    fi
     
     # Install group synchronization module
     if [[ -f "pam_nextcloud_groups.py" ]]; then
@@ -644,61 +628,6 @@ install() {
         print_success "Installed sync script: /usr/local/bin/pam-nextcloud-sync"
     fi
     
-    # Install desktop integration scripts
-    if [[ -f "gnome-nextcloud-setup.sh" ]]; then
-        cp gnome-nextcloud-setup.sh /usr/local/bin/
-        chmod 755 /usr/local/bin/gnome-nextcloud-setup.sh
-        normalize_line_endings /usr/local/bin/gnome-nextcloud-setup.sh
-        print_success "Installed: /usr/local/bin/gnome-nextcloud-setup.sh"
-    fi
-    
-    if [[ -f "kde-nextcloud-setup.sh" ]]; then
-        cp kde-nextcloud-setup.sh /usr/local/bin/
-        chmod 755 /usr/local/bin/kde-nextcloud-setup.sh
-        normalize_line_endings /usr/local/bin/kde-nextcloud-setup.sh
-        print_success "Installed: /usr/local/bin/kde-nextcloud-setup.sh"
-    fi
-    
-    # Install KDE autostart desktop file
-    if [[ -f "kde-nextcloud-setup.sh" ]]; then
-        print_info "Installing KDE autostart configuration..."
-        mkdir -p /etc/xdg/autostart
-        
-        cat > /etc/xdg/autostart/kde-nextcloud-setup.desktop << 'DESKTOP_EOF'
-[Desktop Entry]
-Type=Application
-Name=Nextcloud Integration Setup
-Comment=Complete Nextcloud setup in System Settings (Online Accounts)
-Exec=/usr/local/bin/kde-nextcloud-setup.sh
-Hidden=false
-NoDisplay=false
-X-KDE-autostart-after=panel
-DESKTOP_EOF
-        
-        chmod 644 /etc/xdg/autostart/kde-nextcloud-setup.desktop
-        print_success "Installed: /etc/xdg/autostart/kde-nextcloud-setup.desktop"
-    fi
-    
-    # Install GNOME autostart desktop file
-    if [[ -f "gnome-nextcloud-setup.sh" ]]; then
-        print_info "Installing GNOME autostart configuration..."
-        mkdir -p /etc/xdg/autostart
-        
-        cat > /etc/xdg/autostart/gnome-nextcloud-setup.desktop << 'DESKTOP_EOF'
-[Desktop Entry]
-Type=Application
-Name=Nextcloud Integration Setup
-Comment=Complete Nextcloud setup in GNOME Settings
-Exec=/usr/local/bin/gnome-nextcloud-setup.sh
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Phase=Applications
-DESKTOP_EOF
-        
-        chmod 644 /etc/xdg/autostart/gnome-nextcloud-setup.desktop
-        print_success "Installed: /etc/xdg/autostart/gnome-nextcloud-setup.desktop"
-    fi
     
     # Handle configuration file
     if [[ -f "$CONFIG_DIR/$CONFIG_NAME" ]]; then
@@ -707,7 +636,6 @@ DESKTOP_EOF
             read -p "Overwrite? (y/N): " overwrite
             if [[ "$overwrite" =~ ^[Yy]$ ]]; then
                 cp pam_nextcloud.conf.example "$CONFIG_DIR/$CONFIG_NAME"
-                # Make readable by all (but writable only by root) so desktop integration works
                 chmod 644 "$CONFIG_DIR/$CONFIG_NAME"
                 chown root:root "$CONFIG_DIR/$CONFIG_NAME"
                 # Ensure Linux line endings
@@ -897,12 +825,6 @@ account required    pam_unix.so
 EOF
     fi
     
-    # Add session configuration (for desktop integration only, no group sync)
-    print_info "Adding session configuration (desktop integration)..."
-    
-    if ! grep -q "session.*pam_nextcloud" "$pam_file"; then
-        echo "session optional    pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
-    fi
     
     # Add password configuration (must come before pam_unix)
     print_info "Adding password change configuration..."
@@ -922,8 +844,6 @@ EOF
         fi
     fi
     
-    # Configure common-session if it exists
-    configure_common_session
     
     # Configure common-password if it exists
     configure_common_password
@@ -944,26 +864,6 @@ EOF
     echo ""
 }
 
-# Configure common-session for desktop integration
-configure_common_session() {
-    local pam_file="/etc/pam.d/common-session"
-    
-    if [[ ! -f "$pam_file" ]]; then
-        return
-    fi
-    
-    # Backup existing file
-    if [[ -f "$pam_file" ]]; then
-        local backup_file="${pam_file}.backup-$(date +%Y%m%d-%H%M%S)"
-        cp "$pam_file" "$backup_file"
-    fi
-    
-    # Add session configuration if not present
-    if ! grep -q "session.*pam_nextcloud" "$pam_file"; then
-        echo "session optional    pam_python.so /lib/security/pam_nextcloud.py" >> "$pam_file"
-        print_info "Added session configuration to common-session"
-    fi
-}
 
 # Configure common-password for password changes
 configure_common_password() {

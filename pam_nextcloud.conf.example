@@ -37,15 +37,6 @@ cache_expiry_days = 7
 # Individual cache files will have 600 permissions
 cache_directory = /var/cache/pam_nextcloud
 
-# Desktop integration (optional, default: false)
-# Automatically configure GNOME Online Accounts or KDE accounts
-# for Nextcloud when users log in
-enable_desktop_integration = true
-
-# Force desktop type (optional, default: auto-detect)
-# Options: gnome, kde, or leave blank for auto-detection
-# Only needed if auto-detection fails
-force_desktop_type =
 
 # Group synchronization (optional, default: false)
 # Automatically sync user's Nextcloud groups to local Linux groups
