@@ -445,8 +445,11 @@ def ensure_accounts_service_entry(username, display_name=None):
         os.makedirs(accounts_dir, mode=0o755, exist_ok=True)
         
         # Ensure directory has correct permissions (755, readable by accounts-daemon)
+        # CRITICAL: Directory must be readable by accounts-daemon user
         try:
-            os.chmod(accounts_dir, 0o755)
+            current_mode = os.stat(accounts_dir).st_mode & 0o777
+            if current_mode != 0o755:
+                os.chmod(accounts_dir, 0o755)
             os.chown(accounts_dir, 0, 0)  # root:root
         except Exception:
             pass
@@ -1061,6 +1064,18 @@ def main():
             # Verify AccountsService entries for all users
             accounts_dir = '/var/lib/AccountsService/users'
             print(f"    📝 Checking AccountsService entries in {accounts_dir}...")
+            
+            # Check and fix directory permissions first
+            try:
+                dir_stat = os.stat(accounts_dir)
+                dir_mode = dir_stat.st_mode & 0o777
+                if dir_mode != 0o755:
+                    print(f"      ⚠️  Directory permissions are {oct(dir_mode)[-3:]} (should be 755)")
+                    os.chmod(accounts_dir, 0o755)
+                    print(f"      ✅ Fixed directory permissions")
+            except Exception as e:
+                print(f"      ⚠️  Could not check directory permissions: {str(e)}")
+            
             accounts_service_ok = True
             for username in sorted(group_members):
                 if user_exists(username):
