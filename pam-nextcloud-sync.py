@@ -1043,14 +1043,51 @@ def main():
         print()
         
         # GDM and AccountsService status
-        if not args.dry_run and created_count > 0:
+        if not args.dry_run:
             print("  GDM Login Screen:")
             if gdm_configured:
                 print("    ✅ GDM configured to show user list")
             else:
                 print("    ⚠️  GDM configuration may be needed")
-            print("    📝 AccountsService entries created for all users")
+            
+            # Verify AccountsService entries for all users
+            accounts_dir = '/var/lib/AccountsService/users'
+            print(f"    📝 Checking AccountsService entries in {accounts_dir}...")
+            accounts_service_ok = True
+            for username in sorted(group_members):
+                if user_exists(username):
+                    user_file = os.path.join(accounts_dir, username)
+                    if os.path.exists(user_file):
+                        try:
+                            config = configparser.ConfigParser()
+                            config.read(user_file)
+                            if 'User' in config:
+                                system_account = config.get('User', 'SystemAccount', fallback='true')
+                                if system_account.lower() != 'false':
+                                    print(f"      ⚠️  {username}: SystemAccount={system_account} (should be false)")
+                                    accounts_service_ok = False
+                                else:
+                                    real_name = config.get('User', 'RealName', fallback='')
+                                    if real_name:
+                                        print(f"      ✅ {username}: SystemAccount=false, RealName={real_name}")
+                                    else:
+                                        print(f"      ✅ {username}: SystemAccount=false")
+                            else:
+                                print(f"      ⚠️  {username}: Missing [User] section")
+                                accounts_service_ok = False
+                        except Exception as e:
+                            print(f"      ⚠️  {username}: Error reading file: {str(e)}")
+                            accounts_service_ok = False
+                    else:
+                        print(f"      ❌ {username}: AccountsService file missing!")
+                        accounts_service_ok = False
+            
+            if not accounts_service_ok:
+                print("    ⚠️  Some AccountsService entries have issues - users may not appear")
+            print()
+            
             print("    ⚠️  If users don't appear, try:")
+            print("       - Restart AccountsService: sudo systemctl restart accounts-daemon")
             print("       - Restart GDM: sudo systemctl restart gdm")
             print("       - Check AccountsService: ls -la /var/lib/AccountsService/users/")
             print("       - Verify GDM config: cat /etc/dconf/db/gdm.d/00-show-user-list")
