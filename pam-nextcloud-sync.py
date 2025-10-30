@@ -1001,6 +1001,20 @@ def main():
             print(f"    Total common groups: {len(common_groups)}")
         print()
         
+        # GDM and AccountsService status
+        if not args.dry_run and created_count > 0:
+            print("  GDM Login Screen:")
+            if gdm_configured:
+                print("    ✅ GDM configured to show user list")
+            else:
+                print("    ⚠️  GDM configuration may be needed")
+            print("    📝 AccountsService entries created for all users")
+            print("    ⚠️  If users don't appear, try:")
+            print("       - Restart GDM: sudo systemctl restart gdm")
+            print("       - Check AccountsService: ls -la /var/lib/AccountsService/users/")
+            print("       - Verify GDM config: cat /etc/dconf/db/gdm.d/00-show-user-list")
+            print()
+        
         if args.dry_run:
             print("⚠️  This was a dry run - no changes were made")
             print("   Run without --dry-run to apply changes")
