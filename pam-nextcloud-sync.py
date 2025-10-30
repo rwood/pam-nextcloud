@@ -360,6 +360,82 @@ def lock_local_password(username):
         return False
 
 
+def configure_gdm_user_list():
+    """Configure GDM to show user list on login screen"""
+    try:
+        # Check if GDM is installed
+        gdm_check = subprocess.run(
+            ['systemctl', 'is-enabled', 'gdm'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        # Also check if gdm.service exists
+        gdm_service_check = subprocess.run(
+            ['systemctl', 'list-unit-files', 'gdm.service'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        # Check if dconf is available (needed for GDM config)
+        dconf_check = subprocess.run(
+            ['which', 'dconf'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        if dconf_check.returncode != 0:
+            # dconf not available, skip GDM configuration
+            return False
+        
+        # Create GDM configuration directory
+        gdm_db_dir = '/etc/dconf/db/gdm.d'
+        gdm_lock_dir = '/etc/dconf/db/gdm.d/locks'
+        
+        try:
+            os.makedirs(gdm_db_dir, mode=0o755, exist_ok=True)
+            os.makedirs(gdm_lock_dir, mode=0o755, exist_ok=True)
+        except Exception:
+            return False
+        
+        # Create configuration file
+        config_file = os.path.join(gdm_db_dir, '00-show-user-list')
+        try:
+            with open(config_file, 'w') as f:
+                f.write('[org/gnome/login-screen]\n')
+                f.write('disable-user-list=false\n')
+            os.chmod(config_file, 0o644)
+        except Exception:
+            return False
+        
+        # Create lock file to prevent user override
+        lock_file = os.path.join(gdm_lock_dir, '00-show-user-list')
+        try:
+            with open(lock_file, 'w') as f:
+                f.write('/org/gnome/login-screen/disable-user-list\n')
+            os.chmod(lock_file, 0o644)
+        except Exception:
+            pass  # Lock file is optional
+        
+        # Update dconf database
+        try:
+            subprocess.run(
+                ['dconf', 'update'],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+        except Exception:
+            pass  # dconf update may fail, but config file is still created
+        
+        return True
+    except Exception:
+        return False
+
+
 def ensure_accounts_service_entry(username, display_name=None):
     """Ensure user has an AccountsService entry so they appear in GDM"""
     try:
