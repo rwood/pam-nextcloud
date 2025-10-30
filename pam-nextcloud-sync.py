@@ -458,13 +458,28 @@ def ensure_accounts_service_entry(username, display_name=None):
         # Ensure SystemAccount is false (so user appears in GDM)
         config.set('User', 'SystemAccount', 'false')
         
-        # Set real name if provided
+        # Set real name if provided, otherwise get from passwd
         if display_name:
             config.set('User', 'RealName', display_name)
+        else:
+            # Try to get real name from GECOS field
+            try:
+                if pwd:
+                    user_info = pwd.getpwnam(username)
+                    if user_info.pw_gecos and user_info.pw_gecos != 'Nextcloud user':
+                        # Use GECOS field, but remove everything after first comma
+                        gecos_name = user_info.pw_gecos.split(',')[0]
+                        if gecos_name:
+                            config.set('User', 'RealName', gecos_name)
+            except Exception:
+                pass
         
-        # Write the config file
+        # Write the config file using ConfigParser with proper formatting
+        # AccountsService expects a specific format
         with open(user_file, 'w') as f:
             config.write(f)
+            # Ensure file ends with newline
+            f.write('\n')
         
         # Set proper permissions
         os.chmod(user_file, 0o644)
@@ -651,6 +666,20 @@ def main():
     if gdm_configured:
         print("✅ GDM configured to show user list on login screen")
         print("   Configuration file: /etc/dconf/db/gdm.d/00-show-user-list")
+        
+        # Verify configuration file exists
+        config_file = '/etc/dconf/db/gdm.d/00-show-user-list'
+        if os.path.exists(config_file):
+            print(f"   ✅ Config file exists: {config_file}")
+            try:
+                with open(config_file, 'r') as f:
+                    content = f.read()
+                    print(f"   📄 Content: {repr(content)}")
+            except Exception:
+                pass
+        else:
+            print(f"   ⚠️  Config file missing: {config_file}")
+        
         print("   ⚠️  You may need to restart GDM: sudo systemctl restart gdm")
     else:
         print("ℹ️  GDM configuration skipped (GDM may not be installed or dconf unavailable)")
