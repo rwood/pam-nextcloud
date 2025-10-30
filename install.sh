@@ -262,10 +262,11 @@ fix_pam_file() {
         return 1
     fi
     
-    # Check if pam_nextcloud is configured in this file OR if it includes common-auth
-    # (common-auth might have pam_nextcloud configured)
+    # Check if pam_nextcloud is configured in this file OR if it includes common-auth/common-password
+    # (common-auth/common-password might have pam_nextcloud configured)
     local has_pam_nextcloud=false
     local includes_common_auth=false
+    local includes_common_password=false
     
     if grep -q "pam_nextcloud" "$pam_file"; then
         has_pam_nextcloud=true
@@ -276,6 +277,14 @@ fix_pam_file() {
         if [[ -f "/etc/pam.d/common-auth" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
             has_pam_nextcloud=true
             includes_common_auth=true
+        fi
+    fi
+    
+    if grep -q "^@include[[:space:]]+common-password" "$pam_file"; then
+        # Check if common-password has pam_nextcloud
+        if [[ -f "/etc/pam.d/common-password" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-password"; then
+            has_pam_nextcloud=true
+            includes_common_password=true
         fi
     fi
     
@@ -458,47 +467,52 @@ fix_pam_configurations() {
         fi
     fi
     
-    # List of PAM service files that might include common-auth
-    # We fix any issues with @include common-auth, but don't add pam_nextcloud directly to these
-    local pam_services=(
-        "/etc/pam.d/sddm:SDDM"
-        "/etc/pam.d/gdm-password:GDM"
-        "/etc/pam.d/gdm3:GDM3"
-        "/etc/pam.d/lightdm:LightDM"
-        "/etc/pam.d/sshd:SSH"
-        "/etc/pam.d/sudo:Sudo"
-    )
-    
-    # Check if common-auth has pam_nextcloud configured
-    local common_auth_has_pam_nextcloud=false
-    if [[ -f "/etc/pam.d/common-auth" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
-        common_auth_has_pam_nextcloud=true
-    fi
-    
-    # Only fix services if common-auth is configured
-    if [[ "$common_auth_has_pam_nextcloud" == true ]]; then
-        for service_entry in "${pam_services[@]}"; do
-            local pam_file="${service_entry%%:*}"
-            local service_name="${service_entry##*:}"
-            
-            if [[ -f "$pam_file" ]]; then
-                services_checked=$((services_checked + 1))
+        # List of PAM service files that might include common-auth or common-password
+        # We fix any issues with @include directives, but don't add pam_nextcloud directly to these
+        local pam_services=(
+            "/etc/pam.d/passwd:Passwd"
+            "/etc/pam.d/sddm:SDDM"
+            "/etc/pam.d/gdm-password:GDM"
+            "/etc/pam.d/gdm3:GDM3"
+            "/etc/pam.d/lightdm:LightDM"
+            "/etc/pam.d/sshd:SSH"
+            "/etc/pam.d/sudo:Sudo"
+        )
+        
+        # Check if common-auth or common-password has pam_nextcloud configured
+        local common_auth_has_pam_nextcloud=false
+        local common_password_has_pam_nextcloud=false
+        if [[ -f "/etc/pam.d/common-auth" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-auth"; then
+            common_auth_has_pam_nextcloud=true
+        fi
+        if [[ -f "/etc/pam.d/common-password" ]] && grep -q "pam_nextcloud" "/etc/pam.d/common-password"; then
+            common_password_has_pam_nextcloud=true
+        fi
+        
+        # Only fix services if common-auth or common-password is configured
+        if [[ "$common_auth_has_pam_nextcloud" == true ]] || [[ "$common_password_has_pam_nextcloud" == true ]]; then
+            for service_entry in "${pam_services[@]}"; do
+                local pam_file="${service_entry%%:*}"
+                local service_name="${service_entry##*:}"
                 
-                # If service includes common-auth, fix any issues with the include
-                if grep -q "^@include[[:space:]]+common-auth" "$pam_file"; then
-                    # Fix any issues (like replacing @include with proper fallback if needed)
-                    if fix_pam_file "$pam_file" "$service_name"; then
-                        services_fixed=$((services_fixed + 1))
-                    fi
-                elif grep -q "pam_nextcloud" "$pam_file"; then
-                    # Service has pam_nextcloud directly configured, fix any issues
-                    if fix_pam_file "$pam_file" "$service_name"; then
-                        services_fixed=$((services_fixed + 1))
+                if [[ -f "$pam_file" ]]; then
+                    services_checked=$((services_checked + 1))
+                    
+                    # If service includes common-auth or common-password, fix any issues
+                    if grep -q "^@include[[:space:]]+common-auth" "$pam_file" || grep -q "^@include[[:space:]]+common-password" "$pam_file"; then
+                        # Fix any issues (like replacing @include with proper fallback if needed)
+                        if fix_pam_file "$pam_file" "$service_name"; then
+                            services_fixed=$((services_fixed + 1))
+                        fi
+                    elif grep -q "pam_nextcloud" "$pam_file"; then
+                        # Service has pam_nextcloud directly configured, fix any issues
+                        if fix_pam_file "$pam_file" "$service_name"; then
+                            services_fixed=$((services_fixed + 1))
+                        fi
                     fi
                 fi
-            fi
-        done
-    fi
+            done
+        fi
     
     if [[ $services_fixed -gt 0 ]]; then
         echo ""
