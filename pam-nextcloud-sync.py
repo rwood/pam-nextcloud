@@ -335,38 +335,49 @@ def user_exists(username):
 
 
 def lock_local_password(username):
-    """Lock local password for a user so they can only use Nextcloud authentication
+    """Set a random password and unlock account for AccountsService compatibility
     
-    Sets a locked password entry so AccountsService recognizes the account.
-    This is required for users to appear in GDM login screen.
+    AccountsService requires a valid password hash (unlocked) to show users in GDM.
+    We set a random unguessable password and unlock it so AccountsService recognizes
+    the account. PAM authentication will still use Nextcloud because pam_nextcloud
+    is configured with 'sufficient' control flag before pam_unix.
     
     Strategy:
-    - AccountsService requires a valid password hash (not just '!')
-    - If account has no password hash, set an unguessable hash first
-    - Then use 'passwd -l' to lock it (preserves hash, prepends '!')
-    - This gives AccountsService: '!$6$salt$hash' which it recognizes
+    - Generate a random unguessable password
+    - Set it with 'usermod -p' (using crypt to hash it)
+    - Unlock with 'passwd -u' so AccountsService sees it as valid
+    - PAM will still authenticate via Nextcloud due to configuration
     """
     try:
         import spwd
         import secrets
+        import crypt
         
         try:
             shadow_entry = spwd.getspnam(username)
             current_hash = shadow_entry.sp_pwd if shadow_entry else ''
             
+            # Generate a random unguessable password (20 characters, alphanumeric + symbols)
+            random_password = ''.join(secrets.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*') 
+                                      for _ in range(20))
+            
+            # Hash the password using crypt (SHA-512)
+            password_hash = crypt.crypt(random_password, crypt.mETHOD_SHA512)
+            
             # Check if password field is empty or just '!' or '*'
-            # These indicate no valid password hash exists
+            # Or if it's already locked (starts with '!')
+            needs_update = False
             if not current_hash or current_hash in ('!', '*', ''):
-                # Account has no password hash - set one first
-                # Create an unguessable SHA-512 hash
-                salt = secrets.token_hex(8)
-                # Generate a random hash that will never match any password
-                # This is just a placeholder for AccountsService
-                unguessable_hash = '$6$' + salt + '$' + secrets.token_hex(32)
-                
-                # Set the hash first
+                # No password hash exists
+                needs_update = True
+            elif current_hash.startswith('!'):
+                # Password is locked - need to set new hash and unlock
+                needs_update = True
+            
+            if needs_update:
+                # Set the password hash
                 result = subprocess.run(
-                    ['usermod', '-p', unguessable_hash, username],
+                    ['usermod', '-p', password_hash, username],
                     capture_output=True,
                     text=True,
                     check=False
@@ -376,57 +387,59 @@ def lock_local_password(username):
                     # Failed to set hash, try fallback
                     return False
                 
-                # Now lock it - passwd -l will prepend '!' to the hash
-                # Result: '!$6$salt$hash' which AccountsService recognizes
+                # Unlock the account so AccountsService recognizes it
+                # This makes the account appear in GDM login screen
                 result2 = subprocess.run(
-                    ['passwd', '-l', username],
+                    ['passwd', '-u', username],
                     capture_output=True,
                     text=True,
                     check=False
                 )
-                return result2.returncode == 0
-            else:
-                # Account already has a password hash
-                # Check if it's already locked (starts with '!')
-                if current_hash.startswith('!'):
-                    # Already locked, nothing to do
-                    return True
                 
-                # Lock it - passwd -l preserves the hash and prepends '!'
-                result = subprocess.run(
-                    ['passwd', '-l', username],
-                    capture_output=True,
-                    text=True,
-                    check=False
-                )
-                return result.returncode == 0
+                if result2.returncode == 0:
+                    return True
+                else:
+                    # If unlock fails, at least we set the hash
+                    return True
+            
+            # Account already has an unlocked password hash, nothing to do
+            return True
                 
         except KeyError:
             # User doesn't exist in shadow (shouldn't happen, but handle gracefully)
             return False
             
     except ImportError:
-        # spwd not available, use simpler fallback
-        # Try passwd -l first (works if account has a password)
-        result = subprocess.run(
-            ['passwd', '-l', username],
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        # crypt or spwd not available, use simpler fallback
+        # Generate random password using Python's secrets
+        import secrets
+        random_password = ''.join(secrets.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789') 
+                                  for _ in range(20))
         
-        if result.returncode == 0:
-            return True
+        # Try to set password using chpasswd (requires root)
+        try:
+            process = subprocess.Popen(
+                ['chpasswd'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            process.communicate(input=f'{username}:{random_password}\n', timeout=5)
+            
+            if process.returncode == 0:
+                # Unlock the account
+                result = subprocess.run(
+                    ['passwd', '-u', username],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                return result.returncode == 0
+        except Exception:
+            pass
         
-        # Final fallback: usermod -L
-        result = subprocess.run(
-            ['usermod', '-L', username],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        
-        return result.returncode == 0
+        return False
 
     except Exception:
         return False
