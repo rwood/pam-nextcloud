@@ -822,6 +822,8 @@ def pam_sm_chauthtok(pamh, flags, argv):
         
         # PAM_PRELIM_CHECK: Verify old password
         if flags & pamh.PAM_PRELIM_CHECK:
+            syslog.syslog(syslog.LOG_INFO,
+                f"pam_nextcloud: PAM_PRELIM_CHECK called for user: {username}")
             try:
                 # Get old password
                 old_password = pamh.authtok
@@ -853,6 +855,8 @@ def pam_sm_chauthtok(pamh, flags, argv):
         
         # PAM_UPDATE_AUTHTOK: Actually change the password
         elif flags & pamh.PAM_UPDATE_AUTHTOK:
+            syslog.syslog(syslog.LOG_INFO,
+                f"pam_nextcloud: PAM_UPDATE_AUTHTOK called for user: {username}")
             try:
                 # Get old password (should be available from PRELIM_CHECK)
                 old_password = pamh.oldauthtok
@@ -887,6 +891,9 @@ def pam_sm_chauthtok(pamh, flags, argv):
                     syslog.syslog(syslog.LOG_ERR,
                         f"pam_nextcloud: No new password provided for user: {username}")
                     return pamh.PAM_AUTHTOK_ERR
+                
+                syslog.syslog(syslog.LOG_INFO,
+                    f"pam_nextcloud: Calling change_password API for user: {username}")
                 
                 # Change password on Nextcloud
                 if _authenticator.change_password(username, old_password, new_password):
