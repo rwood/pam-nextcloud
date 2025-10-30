@@ -213,6 +213,52 @@ def get_group_members(admin_username, admin_password, group_name, config):
         return []
 
 
+def get_user_details(admin_username, admin_password, username, config):
+    """Get user details from Nextcloud including display name"""
+    try:
+        api_url = urljoin(config['url'], f'/ocs/v2.php/cloud/users/{username}')
+        
+        response = requests.get(
+            api_url,
+            auth=(admin_username, admin_password),
+            headers={
+                'OCS-APIRequest': 'true',
+                'Accept': 'application/json'
+            },
+            verify=config['verify_ssl'],
+            timeout=config['timeout']
+        )
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                if 'ocs' in data and 'data' in data['ocs']:
+                    user_data = data['ocs']['data'].get('data', {})
+                    if isinstance(user_data, dict):
+                        # Try to get display name (may be under different keys)
+                        display_name = (
+                            user_data.get('displayname') or
+                            user_data.get('display-name') or
+                            user_data.get('display_name') or
+                            user_data.get('name') or
+                            None
+                        )
+                        return {'display_name': display_name}
+            except (ValueError, KeyError):
+                # Try XML parsing
+                try:
+                    root = ET.fromstring(response.content)
+                    display_name_elem = root.find('.//displayname')
+                    if display_name_elem is not None and display_name_elem.text:
+                        return {'display_name': display_name_elem.text}
+                except Exception:
+                    pass
+        
+        return {}
+    except Exception:
+        return {}
+
+
 def get_user_groups(admin_username, admin_password, username, config):
     """Get list of groups a user belongs to"""
     try:
@@ -277,7 +323,7 @@ def user_exists(username):
         return False
 
 
-def create_user(username, create_home=True):
+def create_user(username, display_name=None, create_home=True):
     """Create a local Linux user account"""
     try:
         if user_exists(username):
@@ -288,9 +334,12 @@ def create_user(username, create_home=True):
         if create_home:
             cmd.append('-m')
         
+        # Use display name if provided, otherwise fall back to generic comment
+        comment = display_name if display_name else 'Nextcloud user'
+        
         cmd.extend([
             '-s', '/bin/bash',
-            '-c', 'Nextcloud user',
+            '-c', comment,
             username
         ])
         
@@ -597,11 +646,21 @@ def main():
                 print(f"  ℹ️  User '{username}' already exists, skipping creation")
                 skipped_count += 1
             else:
+                # Get user display name from Nextcloud
+                display_name = None
+                if not args.dry_run:
+                    user_details = get_user_details(admin_username, admin_password, username, config)
+                    display_name = user_details.get('display_name')
+                    if display_name:
+                        print(f"  📝 Found display name: {display_name}")
+                
                 if args.dry_run:
                     print(f"  [DRY RUN] Would create user '{username}'")
+                    if display_name:
+                        print(f"  [DRY RUN] Would use display name: {display_name}")
                     created_count += 1
                 else:
-                    if create_user(username, create_home=not args.no_create_home):
+                    if create_user(username, display_name=display_name, create_home=not args.no_create_home):
                         created_count += 1
                     else:
                         failed_count += 1
