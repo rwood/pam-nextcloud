@@ -822,8 +822,20 @@ def main():
                     else:
                         print(f"  ⚠️  Warning: Could not lock local password for '{username}'")
                         print(f"     User may need to run 'passwd -l {username}' manually")
-                    # Ensure AccountsService entry exists
-                    ensure_accounts_service_entry(username)
+                    # Get display name for existing user
+                    display_name = None
+                    user_details = get_user_details(admin_username, admin_password, username, config)
+                    display_name = user_details.get('display_name')
+                    if display_name:
+                        print(f"  📝 Found display name: {display_name}")
+                    # Ensure AccountsService entry exists with display name
+                    if ensure_accounts_service_entry(username, display_name):
+                        if display_name:
+                            print(f"  ✅ Updated AccountsService entry for '{username}' (display name: {display_name})")
+                        else:
+                            print(f"  ✅ Updated AccountsService entry for '{username}'")
+                    else:
+                        print(f"  ⚠️  Warning: Could not update AccountsService entry for '{username}'")
                 skipped_count += 1
             else:
                 # Get user display name from Nextcloud
