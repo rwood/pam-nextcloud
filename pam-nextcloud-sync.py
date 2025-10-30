@@ -232,9 +232,18 @@ def get_user_details(admin_username, admin_password, username, config):
         if response.status_code == 200:
             try:
                 data = response.json()
+                # Debug: print the structure to understand it
+                # The structure might be ocs.data.data.displayname or ocs.data.displayname
                 if 'ocs' in data and 'data' in data['ocs']:
-                    user_data = data['ocs']['data'].get('data', {})
+                    # Try different possible structures
+                    user_data = data['ocs']['data']
+                    
+                    # Nextcloud might return data directly or nested under 'data'
                     if isinstance(user_data, dict):
+                        # Check if there's a nested 'data' key
+                        if 'data' in user_data and isinstance(user_data['data'], dict):
+                            user_data = user_data['data']
+                        
                         # Try to get display name (may be under different keys)
                         display_name = (
                             user_data.get('displayname') or
@@ -243,8 +252,9 @@ def get_user_details(admin_username, admin_password, username, config):
                             user_data.get('name') or
                             None
                         )
-                        return {'display_name': display_name}
-            except (ValueError, KeyError):
+                        if display_name:
+                            return {'display_name': display_name}
+            except (ValueError, KeyError) as e:
                 # Try XML parsing
                 try:
                     root = ET.fromstring(response.content)
@@ -255,7 +265,8 @@ def get_user_details(admin_username, admin_password, username, config):
                     pass
         
         return {}
-    except Exception:
+    except Exception as e:
+        # Silently fail - we'll just use the default
         return {}
 
 
@@ -320,6 +331,32 @@ def user_exists(username):
             )
             return result.returncode == 0
     except (KeyError, Exception):
+        return False
+
+
+def lock_local_password(username):
+    """Lock local password for a user so they can only use Nextcloud authentication"""
+    try:
+        # Use passwd -l to lock the password (recommended method)
+        result = subprocess.run(
+            ['passwd', '-l', username],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        if result.returncode == 0:
+            return True
+        else:
+            # Fallback: use usermod -L
+            result2 = subprocess.run(
+                ['usermod', '-L', username],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            return result2.returncode == 0
+    except Exception:
         return False
 
 
@@ -644,6 +681,13 @@ def main():
             
             if user_exists(username):
                 print(f"  ℹ️  User '{username}' already exists, skipping creation")
+                # Lock local password if user exists (they should use Nextcloud auth)
+                if not args.dry_run:
+                    if lock_local_password(username):
+                        print(f"  🔒 Locked local password for '{username}' (must use Nextcloud credentials)")
+                    else:
+                        print(f"  ⚠️  Warning: Could not lock local password for '{username}'")
+                        print(f"     User may need to run 'passwd -l {username}' manually")
                 skipped_count += 1
             else:
                 # Get user display name from Nextcloud
@@ -653,6 +697,8 @@ def main():
                     display_name = user_details.get('display_name')
                     if display_name:
                         print(f"  📝 Found display name: {display_name}")
+                    else:
+                        print(f"  ⚠️  Could not retrieve display name for '{username}' (will use default)")
                 
                 if args.dry_run:
                     print(f"  [DRY RUN] Would create user '{username}'")
