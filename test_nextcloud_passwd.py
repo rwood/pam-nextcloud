@@ -105,9 +105,50 @@ def change_password_api(nextcloud_url, username, old_password, new_password, ver
         
         # Check response
         if response.status_code == 200:
-            print(f"\n✅ SUCCESS: Password changed successfully!")
-            print(f"   Response body: {response.text[:500]}")
-            return True, "Password changed successfully", response
+            # Parse XML response to check actual OCS status
+            try:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(response.content)
+                
+                # Find status in meta section
+                meta = root.find('meta')
+                if meta is not None:
+                    status_elem = meta.find('status')
+                    statuscode_elem = meta.find('statuscode')
+                    message_elem = meta.find('message')
+                    
+                    status = status_elem.text if status_elem is not None else None
+                    statuscode = statuscode_elem.text if statuscode_elem is not None else None
+                    message = message_elem.text if message_elem is not None else None
+                    
+                    print(f"\n📋 OCS XML Response:")
+                    print(f"   Status: {status}")
+                    print(f"   Status Code: {statuscode}")
+                    if message:
+                        print(f"   Message: {message}")
+                    
+                    # Status code 100 means OK, anything else is failure
+                    if status == 'ok' or statuscode == '100':
+                        print(f"\n✅ SUCCESS: Password changed successfully!")
+                        return True, "Password changed successfully", response
+                    else:
+                        print(f"\n❌ FAILED: Password change rejected by Nextcloud")
+                        print(f"   Reason: {message or f'Status code {statuscode}'}")
+                        return False, f"Password change failed: {message or f'Status code {statuscode}'}", response
+                else:
+                    print(f"\n⚠️  WARNING: No meta section in XML response")
+                    print(f"   Assuming success (some Nextcloud versions may not return XML)")
+                    print(f"\n✅ SUCCESS: Password changed successfully!")
+                    return True, "Password changed successfully", response
+            except ET.ParseError as e:
+                print(f"\n⚠️  WARNING: Could not parse XML response: {e}")
+                print(f"   Response body: {response.text[:500]}")
+                print(f"   Assuming success since HTTP status is 200")
+                print(f"\n✅ SUCCESS: Password changed successfully!")
+                return True, "Password changed successfully", response
+            except Exception as e:
+                print(f"\n❌ ERROR: Unexpected error parsing XML: {e}")
+                return False, f"Error parsing XML response: {str(e)}", response
         elif response.status_code == 401:
             print(f"\n❌ FAILED: Unauthorized (401)")
             print(f"   Response: {response.text[:500]}")
