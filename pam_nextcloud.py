@@ -290,6 +290,9 @@ class NextcloudAuth:
             # This works with regular user credentials (no admin required)
             api_url = urljoin(self.nextcloud_url, '/ocs/v2.php/cloud/user')
             
+            syslog.syslog(syslog.LOG_INFO,
+                f"pam_nextcloud: Attempting authentication for user: {username} against {api_url}")
+            
             response = requests.get(
                 api_url,
                 auth=(username, password),
@@ -300,6 +303,9 @@ class NextcloudAuth:
                 verify=self.verify_ssl,
                 timeout=self.timeout
             )
+            
+            syslog.syslog(syslog.LOG_INFO,
+                f"pam_nextcloud: Authentication API response status: {response.status_code} for user: {username}")
             
             # Nextcloud returns 200 OK with valid credentials
             # and 401 Unauthorized with invalid credentials
@@ -315,6 +321,19 @@ class NextcloudAuth:
             elif response.status_code == 401:
                 syslog.syslog(syslog.LOG_WARNING,
                     f"pam_nextcloud: Authentication failed for user: {username}")
+                syslog.syslog(syslog.LOG_INFO,
+                    f"pam_nextcloud: Nextcloud API returned 401 - checking if cache needs invalidation")
+                # Invalidate cache if password failed on server (password may have changed)
+                if self.enable_cache:
+                    cache_file = self._get_cache_file_path(username)
+                    if os.path.exists(cache_file):
+                        try:
+                            os.remove(cache_file)
+                            syslog.syslog(syslog.LOG_INFO,
+                                f"pam_nextcloud: Invalidated cache for user: {username} after authentication failure")
+                        except Exception as e:
+                            syslog.syslog(syslog.LOG_WARNING,
+                                f"pam_nextcloud: Could not remove cache file: {str(e)}")
                 # Don't try cache - password is wrong on server
                 return False
             else:
