@@ -468,6 +468,10 @@ def ensure_accounts_service_entry(username, display_name=None):
         # Ensure SystemAccount is false (so user appears in GDM)
         config.set('User', 'SystemAccount', 'false')
         
+        # Ensure AccountType is set to "desktop" (not "system")
+        # This is required for users to appear in GDM
+        config.set('User', 'AccountType', 'desktop')
+        
         # Set real name if provided, otherwise get from passwd
         if display_name:
             config.set('User', 'RealName', display_name)
