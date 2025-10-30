@@ -323,6 +323,12 @@ class NextcloudAuth:
                     f"pam_nextcloud: Authentication failed for user: {username}")
                 syslog.syslog(syslog.LOG_INFO,
                     f"pam_nextcloud: Nextcloud API returned 401 - checking if cache needs invalidation")
+                # Log response body for debugging
+                try:
+                    syslog.syslog(syslog.LOG_INFO,
+                        f"pam_nextcloud: Response body: {response.text[:200]}")
+                except Exception:
+                    pass
                 # Invalidate cache if password failed on server (password may have changed)
                 if self.enable_cache:
                     cache_file = self._get_cache_file_path(username)
