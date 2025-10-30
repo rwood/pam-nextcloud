@@ -335,9 +335,27 @@ def user_exists(username):
 
 
 def lock_local_password(username):
-    """Lock local password for a user so they can only use Nextcloud authentication"""
+    """Lock local password for a user so they can only use Nextcloud authentication
+    
+    Sets a locked password entry (!) so AccountsService recognizes the account.
+    This is required for users to appear in GDM login screen.
+    """
     try:
-        # Use passwd -l to lock the password (recommended method)
+        # First, ensure there's a password entry (even if locked)
+        # This is critical for AccountsService to show the user in GDM
+        # Set password to '!' which means locked/disabled
+        result = subprocess.run(
+            ['usermod', '-p', '!', username],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        if result.returncode == 0:
+            return True
+        
+        # If usermod -p fails, try passwd -l as fallback
+        # This works if the account already has a password set
         result = subprocess.run(
             ['passwd', '-l', username],
             capture_output=True,
@@ -347,15 +365,17 @@ def lock_local_password(username):
         
         if result.returncode == 0:
             return True
-        else:
-            # Fallback: use usermod -L
-            result2 = subprocess.run(
-                ['usermod', '-L', username],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            return result2.returncode == 0
+        
+        # Final fallback: usermod -L
+        result = subprocess.run(
+            ['usermod', '-L', username],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        return result.returncode == 0
+
     except Exception:
         return False
 
