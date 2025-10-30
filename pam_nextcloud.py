@@ -410,15 +410,69 @@ class NextcloudAuth:
             )
             
             # Nextcloud returns 200 OK on successful password change
+            # But we need to check the OCS XML response for the actual status
             if response.status_code == 200:
-                syslog.syslog(syslog.LOG_INFO,
-                    f"pam_nextcloud: Password changed successfully for user: {username}")
-                
-                # Update cache with new password
-                if self.enable_cache:
-                    self._cache_password(username, new_password)
-                
-                return True
+                # Parse XML response to check actual status
+                try:
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(response.content)
+                    
+                    # Find status in meta section
+                    meta = root.find('meta')
+                    if meta is not None:
+                        status_elem = meta.find('status')
+                        statuscode_elem = meta.find('statuscode')
+                        message_elem = meta.find('message')
+                        
+                        status = status_elem.text if status_elem is not None else None
+                        statuscode = statuscode_elem.text if statuscode_elem is not None else None
+                        message = message_elem.text if message_elem is not None else None
+                        
+                        # Status code 100 means OK, anything else is failure
+                        if status == 'ok' or statuscode == '100':
+                            syslog.syslog(syslog.LOG_INFO,
+                                f"pam_nextcloud: Password changed successfully for user: {username}")
+                            
+                            # Update cache with new password
+                            if self.enable_cache:
+                                self._cache_password(username, new_password)
+                            
+                            return True
+                        else:
+                            # Password change failed due to validation or other reason
+                            error_msg = f"Password change failed: {message or f'Status code {statuscode}'}"
+                            syslog.syslog(syslog.LOG_WARNING,
+                                f"pam_nextcloud: {error_msg} for user: {username}")
+                            return False
+                    else:
+                        # No meta section found, assume success (some Nextcloud versions may not return XML)
+                        syslog.syslog(syslog.LOG_INFO,
+                            f"pam_nextcloud: Password changed successfully for user: {username}")
+                        
+                        # Update cache with new password
+                        if self.enable_cache:
+                            self._cache_password(username, new_password)
+                        
+                        return True
+                except ET.ParseError:
+                    # XML parsing failed, but HTTP 200 means something succeeded
+                    # Log a warning but assume success
+                    syslog.syslog(syslog.LOG_WARNING,
+                        f"pam_nextcloud: Could not parse XML response for password change, but HTTP 200: {username}")
+                    syslog.syslog(syslog.LOG_INFO,
+                        f"pam_nextcloud: Password changed successfully for user: {username}")
+                    
+                    # Update cache with new password
+                    if self.enable_cache:
+                        self._cache_password(username, new_password)
+                    
+                    return True
+                except Exception as e:
+                    # XML parsing had an unexpected error
+                    syslog.syslog(syslog.LOG_ERR,
+                        f"pam_nextcloud: Error parsing XML response: {str(e)}")
+                    # Still return False to be safe
+                    return False
             elif response.status_code == 401:
                 syslog.syslog(syslog.LOG_WARNING,
                     f"pam_nextcloud: Password change unauthorized for user: {username}")
