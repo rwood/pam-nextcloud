@@ -408,6 +408,9 @@ class NextcloudAuth:
             
             # Nextcloud returns 200 OK on successful password change
             # But we need to check the OCS XML response for the actual status
+            syslog.syslog(syslog.LOG_DEBUG,
+                f"pam_nextcloud: Password change API response status: {response.status_code}")
+            
             if response.status_code == 200:
                 # Parse XML response to check actual status
                 try:
@@ -440,6 +443,8 @@ class NextcloudAuth:
                             error_msg = f"Password change failed: {message or f'Status code {statuscode}'}"
                             syslog.syslog(syslog.LOG_WARNING,
                                 f"pam_nextcloud: {error_msg} for user: {username}")
+                            syslog.syslog(syslog.LOG_DEBUG,
+                                f"pam_nextcloud: XML response: {response.text[:500]}")
                             return False
                     else:
                         # No meta section found, assume success (some Nextcloud versions may not return XML)
